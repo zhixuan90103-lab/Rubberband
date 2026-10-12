@@ -84,6 +84,7 @@ function bootScene(): {
   scene: THREE.Scene;
   camera: THREE.OrthographicCamera;
   actor: THREE.Group;
+  actorShadow: THREE.Mesh;
   arms: THREE.Mesh;
   flash: THREE.Mesh;
   pegRoot: THREE.Group;
@@ -107,6 +108,10 @@ function bootScene(): {
   const actor = makeMonkey();
   scene.add(actor);
 
+  const { headW } = monkeySize();
+  const actorShadow = makeShadow(headW * 0.88, headW * 0.88, 0.8, 0.5);
+  scene.add(actorShadow);
+
   const flash = new THREE.Mesh(
     new THREE.CircleGeometry(18, 20),
     new THREE.MeshBasicMaterial({
@@ -118,7 +123,7 @@ function bootScene(): {
   );
   scene.add(flash);
 
-  return { scene, camera, actor, arms, flash, pegRoot, backdrop, jungle };
+  return { scene, camera, actor, actorShadow, arms, flash, pegRoot, backdrop, jungle };
 }
 
 /**
@@ -209,6 +214,8 @@ function mountJungle(backdrop: THREE.Group): THREE.Texture {
     new THREE.MeshBasicMaterial({ map: jungle, toneMapped: false, side: THREE.DoubleSide }),
   );
   sheet.position.set(DESIGN_WIDTH / 2, DESIGN_HEIGHT / 2, -1);
+  // Opaque and full-screen. A higher renderOrder would paint over the shadows.
+  sheet.renderOrder = -3;
   backdrop.add(sheet);
   return jungle;
 }
@@ -246,8 +253,72 @@ function placeArms(
   arms.scale.set(1, length, 1);
 }
 
+/**
+ * Contact shadow from the reference. +x is right, +y is down.
+ * The oval hangs off the lower-right edge. The sprite quads are nearly
+ * opaque, so a shadow centered on the body is covered and never shows.
+ */
+const shadowMaps = new Map<string, THREE.DataTexture>();
+
+/** `solid` is how far across the radius the oval stays dark before it fades. */
+function shadowTexture(solid: number, opacity = 1): THREE.DataTexture {
+  const key = `${solid}:${opacity}`;
+  const cached = shadowMaps.get(key);
+  if (cached) return cached;
+  const n = 64;
+  const data = new Uint8Array(n * n * 4);
+  for (let y = 0; y < n; y++) {
+    for (let x = 0; x < n; x++) {
+      const dx = (x + 0.5) / n - 0.5;
+      const dy = (y + 0.5) / n - 0.5;
+      const dist = Math.hypot(dx, dy) / 0.5;
+      let falloff = 0;
+      if (solid <= 0) falloff = dist >= 1 ? 0 : (1 - dist) ** 1.15;
+      else if (dist < solid) falloff = 1;
+      else if (dist < 1) falloff = 1 - (dist - solid) / (1 - solid);
+      const i = (y * n + x) * 4;
+      data[i] = 20;
+      data[i + 1] = 36;
+      data[i + 2] = 14;
+      data[i + 3] = Math.round(falloff * opacity * 255);
+    }
+  }
+  const map = new THREE.DataTexture(data, n, n);
+  map.colorSpace = THREE.SRGBColorSpace;
+  map.premultiplyAlpha = true;
+  map.generateMipmaps = false;
+  map.magFilter = THREE.LinearFilter;
+  map.minFilter = THREE.LinearFilter;
+  map.needsUpdate = true;
+  shadowMaps.set(key, map);
+  return map;
+}
+
+function makeShadow(width: number, height: number, solid = 0, opacity = 1): THREE.Mesh {
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(width, height),
+    new THREE.MeshBasicMaterial({
+      map: shadowTexture(solid, opacity),
+      transparent: true,
+      premultipliedAlpha: true,
+      depthWrite: false,
+      depthTest: false,
+      toneMapped: false,
+      side: THREE.DoubleSide,
+    }),
+  );
+  mesh.renderOrder = -2;
+  return mesh;
+}
+
 function makePegView(): PegView {
   const group = new THREE.Group();
+  const shadow = makeShadow(PEG_W * 1.25, PEG_W * 0.88, 0.3, 0.65);
+  // Above the back plate (renderOrder -1), under the red and blue caps (renderOrder 3).
+  // Local +x is the long axis. +y is down, so this aims down-right, away from the peg.
+  shadow.renderOrder = 1;
+  shadow.rotation.z = Math.atan2(PEG_H, PEG_W);
+  shadow.position.set(PEG_W * 0.38, PEG_H * 0.38, 0.2);
   const back = artSprite(pegBackUrl, PEG_W, PEG_H);
   back.renderOrder = -1;
   back.position.z = -0.4;
@@ -258,7 +329,7 @@ function makePegView(): PegView {
   blue.position.z = 0.8;
   red.position.z = 0.8;
   red.visible = false;
-  group.add(back, blue, red);
+  group.add(shadow, back, blue, red);
   return { group, blue, red };
 }
 
@@ -266,6 +337,7 @@ function syncView(
   world: SlingWorld,
   camera: THREE.OrthographicCamera,
   actor: THREE.Group,
+  actorShadow: THREE.Mesh,
   arms: THREE.Mesh,
   flash: THREE.Mesh,
   pegRoot: THREE.Group,
@@ -284,6 +356,10 @@ function syncView(
   actor.position.set(world.body.x, world.body.y, 0.4);
   actor.rotation.z = world.body.spin;
   actor.scale.set(1 + squash * 0.35, 1 - squash * 0.4, 1);
+  const { headW, headH } = monkeySize();
+  actorShadow.position.set(world.body.x + headW * 0.12, world.body.y + headH * 0.17, 0);
+  actorShadow.rotation.z = 0;
+  actorShadow.scale.set(actor.scale.x, 1, 1);
 
   const held = world.pegs.find((peg) => peg.id === world.heldId);
   const showArms =
@@ -350,7 +426,7 @@ async function boot(): Promise<void> {
   const renderer = await createRenderer({ container: stage });
   renderer.domElement.style.pointerEvents = 'auto';
 
-  const { scene, camera, actor, arms, flash, pegRoot, backdrop, jungle } = bootScene();
+  const { scene, camera, actor, actorShadow, arms, flash, pegRoot, backdrop, jungle } = bootScene();
   const pegViews = new Map<number, PegView>();
 
   let layout: StageLayout | null = null;
@@ -424,7 +500,7 @@ async function boot(): Promise<void> {
     const frameDt = (now - last) / 1000;
     last = now;
     advance(world, frameDt);
-    syncView(world, camera, actor, arms, flash, pegRoot, pegViews, backdrop, jungle);
+    syncView(world, camera, actor, actorShadow, arms, flash, pegRoot, pegViews, backdrop, jungle);
     const pull = Math.round(pullLength(world));
     setStatus(
       `${platform}${native ? ' · native' : ''}\n` +
