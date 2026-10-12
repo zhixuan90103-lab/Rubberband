@@ -10,7 +10,8 @@
 | [docs/MERGE.md](./docs/MERGE.md) | 双工程优点对照与合并说明 |
 | [docs/AUDIO.md](./docs/AUDIO.md) | 音效方案（预解码 + 每帧一批 + 原生池） |
 | [docs/HAPTICS.md](./docs/HAPTICS.md) | 震动如何一次接对（插件注册 + 玩法层） |
-| [docs/SLING-KONG-FEEL.md](./docs/SLING-KONG-FEEL.md) | Sling Kong 手感调研结论与原型暂定 |
+| [docs/SLING-KONG-FEEL.md](./docs/SLING-KONG-FEEL.md) | 手感来源，以及已经写进 `tune.ts` 的常数 |
+| [docs/MVP-PLAN.md](./docs/MVP-PLAN.md) | 拉射已落地的范围，和还没做的部分 |
 
 ## 30 秒上手
 
@@ -21,7 +22,7 @@ npm run dev
 # → http://127.0.0.1:5190/
 ```
 
-应看到：桌面手机框、紫色立方体、safe/scale 状态、右上角 **手机/Pad** 切换、底部 **点我震动**。桌面无原生马达，属正常。
+应看到：桌面手机框、右上角 **手机/Pad** 切换、竖道里挂在钉子下的角色和上方几颗钉。按住角色拖动再松手。脚本端口是 `5190`。本机 5190–5192 已被别的项目占用时，用 `npm run dev -- --port 5193 --strictPort`。
 
 ## 合并了什么
 

@@ -24,6 +24,8 @@
 | 构建 | `vite.config.ts`（**`base: './'`**） |
 | iOS 注入 | `scripts/bootstrap-ios.mjs` |
 | 音效方案（未实现） | `docs/AUDIO.md` |
+| 拉射手感常数 | `src/game/tune.ts` · `docs/SLING-KONG-FEEL.md` §7 |
+| 拉射做了什么 | `docs/MVP-PLAN.md` · `src/game/sling.ts` |
 
 ## DOM（勿拆）
 
@@ -68,6 +70,6 @@ npm run ios
 
 ## 刻意不做
 
-- 具体游戏玩法（demo 立方体可删）  
+- 溶解、移动钉、撞墙、障碍、金币、音效（见 `docs/MVP-PLAN.md`）  
 - Android（可后加）  
 - WebGL 静默回退  

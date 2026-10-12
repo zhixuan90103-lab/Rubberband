@@ -1,8 +1,14 @@
-# Sling Kong 手感调研结论
+# Sling Kong 手感
 
-对照对象是 Protostar 2015 年的 **Sling Kong**。本文只记录已核对的手感结论、来源冲突和原型暂定。不包含震动、金币、音效方案、角色差异和商业化。
+对照对象是 Protostar 2015 年的 **Sling Kong**。
 
-配套：[AGENTS.md](../AGENTS.md) · [ENGINEERING.md](./ENGINEERING.md)
+- §1–§6、§8 是检索结论和来源。数字没被录像复核之前，保持原样。
+- §7 是已经写进 `src/game/tune.ts` 的常数。改手感先改那里，再改这一节，两边用同一组数。
+- 这一版做了什么、还没做什么，见 [MVP-PLAN.md](./MVP-PLAN.md)。
+
+不包含震动、金币、音效方案、角色差异和商业化。
+
+配套：[AGENTS.md](../AGENTS.md) · [ENGINEERING.md](./ENGINEERING.md) · [MVP-PLAN.md](./MVP-PLAN.md)
 
 ## 1. 要做的手感
 
@@ -90,41 +96,39 @@
 
 不采用 Minigamesville、Poki、Kiz10、8Games、Y8、Playgama 上的玩法介绍。那些页面把复刻或门户文案写成原作。
 
-## 7. 实现检索（2026-10-10）
+## 7. 已落地的手感常数
 
-底座约束已经在代码里：
+这些数是为 390×844 写的，不是原作实测。真源是 `src/game/tune.ts`。
 
-- `clientToDesign` 给出设计像素，y 向下。Letterbox 外不参与玩法。
-- `body` 已有 `touch-action: none` 和 `overscroll-behavior: none`。
-- `canvas` 默认 `pointer-events: none`。玩法要在 `renderer.domElement` 上打开，和现在的 OrbitControls 一样。`#ui-root` 默认不接指针。
-- `resizeToDesign` 只接受 `PerspectiveCamera`。正交相机要自己写视锥，不能复用这个函数。
-
-Three 手册（OrthographicCamera，top-left origin）：`left = 0`，`right = 390`，`top = 0`，`bottom = 844`，`near = -1`，`far = 1`。这样世界坐标和设计坐标同一套，y 向下，不再做第二次翻转。镜头只改 `camera.position`，不改 `renderer.setSize`。
-
-命中不用 `Raycaster`。指针已经在设计像素里，角色和钉都在这个平面上，用距离判定。
-
-手臂不用 `Line`。本仓库的 `WebGPURenderer` 把 `Line` 画成 1 像素的 `line-strip`（`WebGPUUtils.getPrimitiveTopology`），`linewidth` 不会变粗。第一版用一条朝 +X 的细长 `PlaneGeometry`，放在钉与角色的中点，按拉距缩放长度，再绕 Z 转到拉向量。不写 TSL。
-
-`#ui-root` 在画布之上（`z-index: 2`）。它本身不接指针，但 `.panel` 是 `pointer-events: auto`。玩法拖动不能被这块面板挡住。现有的 `OrbitControls` 会和正交镜头抢相机，做拉射时去掉。
-
-运动不用物理引擎。四个状态：挂住、拖动、飞行、坠落。固定步长 1/60 秒，溶解和飞行都走这个步长。
-
-### 实现暂定
-
-这些数是为了在 390×844 里让下一颗钉大约在 160–220 设计像素外，拉满大约能到。不是原作实测。
-
-| 常数 | 值 | 理由 |
+| 常数 | 值 | 代码里怎么用 |
 |---|---|---|
-| 最大拉距 | 160 px | 拉满对应一颗常规间距的钉 |
-| 初速系数 | 3.8 / 秒 | 160 px 拉满得约 608 px/s |
-| 重力 | 900 px/s² | 朝设计坐标 +y。拉满竖直向上时，约 0.45 秒飞 180 px |
-| 接钉半径 | 36 px | 距离判定 |
-| 旧钉保护 | 0.18 秒 | 离开后这段时间不能抓回刚松开的钉 |
-| 起拖命中半径 | 48 px | 必须按在角色附近 |
-| 底边禁起拖 | y > 844 − 34 | 避开 Home 指示条。已捕获的拖动可以继续 |
-| 瞄准镜头 | 锚在当前钉 | 不跟被拉开的角色 |
-| 飞行镜头 | 位置滞后约 0.12 秒 | 只平移。人往上走时减小 `camera.position.y` |
-| 手臂 | 细长平面，不是 Line | WebGPU 的 Line 只有 1 像素 |
+| `HANG_DROP` | 78 px | 身体中心在钉子正下方。设计 +y 向下 |
+| `SHOULDER` | 14 px | 两只手在身体两侧的间距 |
+| `MAX_PULL` | 160 px | 从悬挂姿势再拉出的长度，超过就夹住 |
+| `MIN_PULL` | 28 px | 短于这个，松手取消，回到悬挂 |
+| `LAUNCH_SCALE` | 3.8 / 秒 | 拉满约 608 px/s，方向与拉向量相反 |
+| `GRAVITY` | 900 px/s² | 朝设计 +y。竖直拉满时，顶点大约在发射点上方 205 px |
+| `GRAB_RADIUS` | 36 px | 手到钉心的距离。手在身体中心上方一个 `HANG_DROP` |
+| `GRAB_START_RADIUS` | 48 px | 起拖必须按在身体附近 |
+| `OLD_PEG_LOCK` | 0.18 秒 | 只锁刚松开的那颗钉 |
+| `FIXED_DT` | 1/60 秒 | 飞行和镜头都走这个步长 |
+| `PEG_SCREEN_ANCHOR` | 0.7 | 悬挂中的身体放在画面高度的 70% |
+| `CAMERA_LAG` | 0.12 秒 | 飞行时镜头追身体。瞄准时镜头停在悬挂点，不跟被拉开的身体 |
+| `DRAG_BLOCK_Y` | 810 | `844 − 34`。低于这条不能新起一次拖动 |
+| `PEG_GAP_MIN` / `MAX` | 100 / 130 px | 只在 `nextPeg` 里用 |
+| `PEG_X_SPREAD` | 90 px | 左右散开，仍夹在竖道 78–312 里 |
+| `PEGS_AHEAD` | 4 | 当前钉之上再留 4 颗 |
+| `RED_PEG_CHANCE` | 0.18 | 只改颜色。溶解还没做 |
+
+渲染上同时成立的约定：
+
+- 正交相机是 `left = 0`，`right = 390`，`top = 0`，`bottom = 844`，`near = 0.1`，`far = 50`，相机在 `z = 10`。投影的 Y 系数是负的，正面会被裁掉。角色、钉子、手臂、竖道都用 `MeshBasicMaterial` 的 `DoubleSide`。
+- 镜头只改 `camera.position`。人往上时减小 `camera.position.y`。不用 `resizeToDesign`，也不用绘图缓冲的像素尺寸。
+- 手臂不用 `Line`。WebGPU 把 `Line` 画成 1 像素的 `line-strip`。两只手臂各是一条朝 +X 平移过半长的 `PlaneGeometry`，从钉子画到肩膀，绕 Z 转到拉向量。
+- 命中不用 `Raycaster`。指针只经 `clientToDesign`。Letterbox 外忽略。
+- 不用物理引擎。状态是 `hang`、`drag`、`fly`、`fall`。
+
+2026-10-12 的参考录像用来对悬挂姿势、画面里同时能看见的钉子、松手闪光、飞行旋转和抓住时的压扁。锯、火、碾压、金币和大号高度数字不在这一版里。
 
 ## 8. 开源对照（2026-10-10）
 
@@ -157,3 +161,4 @@ Three 手册（OrthographicCamera，top-left origin）：`left = 0`，`right = 3
 | 2026-10-10 | 实现检索：正交设计坐标、距离判定、动态线段、暂定物理常数 |
 | 2026-10-10 | 三轮反查：手臂改为平面；上升时减小 camera.position.y；UI 面板会挡住拖动 |
 | 2026-10-10 | 开源对照：没有同一条拉射循环的仓库。不接入外部物理引擎 |
+| 2026-10-12 | 常数改到与 `tune.ts` 一致：悬挂 78 px、身体锚在 70%、间距 100–130、前方 4 颗钉、两只手臂、手的位置接钉。溶解仍未做 |

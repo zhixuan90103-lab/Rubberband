@@ -18,11 +18,13 @@ index.html
   → main.ts
        → applyNativeClass / safeArea
        → createRenderer(#stage)
-       → demo scene
+       → game/sling.ts + game/pegs.ts（常数在 game/tune.ts）
        → mountDevicePreview → computeStageLayout → applyStageTransform
        → watchStageLayout
-       → haptics + HUD buttons
+       → 指针：clientToDesign → tryBeginDrag / dragTo / endDrag
 ```
+
+震动代码还在 `src/utils/haptics.ts`，当前画面没有「点我震动」按钮。真机验收步骤仍见 [HAPTICS.md](./HAPTICS.md)。
 
 ## 3. DOM
 
@@ -50,10 +52,9 @@ Xcode Run 真机
   → capacitorDidLoad → registerPluginInstance(AdvancedHapticsPlugin)
   → load App/public (= dist)
   → 同上 Web 链
-  → HUD「点我震动」→ haptics.impact('medium')
 ```
 
-HUD 状态行有 `plugin: true/false`。`false` = 仍在默认 `CAPBridgeViewController`，插件未进 JS `PluginHeaders`。
+震动插件注册后，HUD 状态行才会有 `plugin: true/false`。`false` = 仍在默认 `CAPBridgeViewController`，插件未进 JS `PluginHeaders`。当前拉射页没有这块 HUD。
 
 ## 5. 改配置找谁
 

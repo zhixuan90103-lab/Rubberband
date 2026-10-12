@@ -1,10 +1,10 @@
 # Engineering — portrait-webgpu-base
 
-配套：[AGENTS.md](../AGENTS.md) · [ENTRYPOINTS.md](./ENTRYPOINTS.md) · [MERGE.md](./MERGE.md) · [AUDIO.md](./AUDIO.md) · [HAPTICS.md](./HAPTICS.md) · [SLING-KONG-FEEL.md](./SLING-KONG-FEEL.md)
+配套：[AGENTS.md](../AGENTS.md) · [ENTRYPOINTS.md](./ENTRYPOINTS.md) · [MERGE.md](./MERGE.md) · [AUDIO.md](./AUDIO.md) · [HAPTICS.md](./HAPTICS.md) · [SLING-KONG-FEEL.md](./SLING-KONG-FEEL.md) · [MVP-PLAN.md](./MVP-PLAN.md)
 
 ## 1. 定位
 
-可复制的 **竖屏 WebGPU 手游底座**：能 dev、能 build、能真机、能震动、桌面≈手机/Pad。不含具体玩法（demo 可删）。
+可复制的 **竖屏 WebGPU 手游底座**：能 dev、能 build、能真机、能震动、桌面≈手机/Pad。当前玩法是拉射，范围见 [MVP-PLAN.md](./MVP-PLAN.md)。底座约定不随玩法改。
 
 ## 2. 目录
 
@@ -17,7 +17,8 @@ portrait-webgpu-base/
 ├── vite.config.ts          # base: './' · port 5190
 ├── capacitor.config.ts     # contentInset never · scrollEnabled false
 ├── src/
-│   ├── main.ts             # demo（可替换）
+│   ├── main.ts             # 场景、手臂、指针
+│   ├── game/               # tune / pegs / sling / selftest
 │   ├── create-renderer.ts
 │   ├── style.css
 │   ├── adapt/
@@ -129,6 +130,16 @@ npm install && npm run ios:bootstrap && npm run cap:open
 npm run cap:sync
 ```
 
+## 8b. 拉射画面
+
+玩法坐标是设计像素，y 向下，和 `clientToDesign` 同一套。正交相机 `top = 0`、`bottom = 844`，投影 Y 为负，`FrontSide` 会被裁掉，只剩清屏色。角色、钉子、手臂、竖道用 `DoubleSide`。
+
+`resizeToDesign` 只接受透视相机。这里视锥就是 390×844，不跟窗口，也不用绘图缓冲宽度。跟随只减小 `camera.position.y`。
+
+手臂是平移过的细长平面。不要换回 `THREE.Line`，WebGPU 上它只有 1 像素。
+
+`#ui-root` 在画布之上且默认不接指针。`.panel` 会接指针。玩法 HUD 不要再盖住竖道。
+
 ## 9. 已知坑
 
 1. **不要**把 `base` 改回 `'/'`  
@@ -147,3 +158,4 @@ npm run cap:sync
 | 2026-08-14 | 增加 AUDIO.md：音效不卡帧方案 |
 | 2026-08-14 | 增加 HAPTICS.md：震动一次接对 |
 | 2026-08-31 | 真机震动验通。根因：Capacitor 8 `SceneDelegate` 绕过 storyboard。bootstrap 现会改 SceneDelegate；HUD 用「点我震动」+ `plugin` 标志验收 |
+| 2026-10-12 | 拉射替换 demo。正交负 Y 必须 `DoubleSide`。手感数字以 `src/game/tune.ts` 和 SLING-KONG-FEEL §7 为准 |
