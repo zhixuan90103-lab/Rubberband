@@ -34,16 +34,19 @@ import {
   type SlingWorld,
 } from './game/sling';
 import {
-  ARM_SAG,
   BODY_RADIUS,
   DRAG_BLOCK_Y,
-  HANG_DROP,
   MAX_PULL,
   MIN_PULL,
-  SHOULDER,
 } from './game/tune';
-import type { Peg } from './game/pegs';
 import bgUrl from './assets/bg-jungle.png';
+import eyesUrl from './assets/art/04-two-slots.png';
+import faceUrl from './assets/art/05-monkey-face.png';
+import footUrl from './assets/art/07-dark-oval.png';
+import armsUrl from './assets/art/08-pair-limbs.png';
+import pegBackUrl from './assets/art/03-dark-disc.png';
+import pegBlueUrl from './assets/art/02-blue-ring.png';
+import pegRedUrl from './assets/art/01-pink-ring.png';
 
 const stage = document.getElementById('stage')!;
 const shell = document.getElementById('shell')!;
@@ -60,36 +63,28 @@ function makeOrtho(): THREE.OrthographicCamera {
   return camera;
 }
 
-const ARM_SEGMENTS = 10;
-
-function makeArm(): THREE.Mesh {
-  const positions = new Float32Array((ARM_SEGMENTS + 1) * 2 * 3);
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  const indices: number[] = [];
-  for (let i = 0; i < ARM_SEGMENTS; i += 1) {
-    const a = i * 2;
-    indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
-  }
-  geometry.setIndex(indices);
-  return new THREE.Mesh(
-    geometry,
-    new THREE.MeshBasicMaterial({ color: 0xf4efe4, side: THREE.DoubleSide }),
-  );
-}
-
 type PegView = {
   group: THREE.Group;
-  rim: THREE.Mesh;
-  core: THREE.Mesh;
+  blue: THREE.Mesh;
+  red: THREE.Mesh;
 };
+
+/** Ring and back plate share a 129×123 canvas. One size keeps them aligned. */
+const PEG_W = 52;
+const PEG_H = PEG_W * (123 / 129);
+
+/** Face art is 242×223. Pupils and feet are placed in that pixel frame. */
+const FACE_W = 242;
+const FACE_H = 223;
+/** 08-pair-limbs.png is one picture of both arms. Hands are the top of the file. */
+const ARM_TEX_W = 143;
+const ARM_TEX_H = 130;
 
 function bootScene(): {
   scene: THREE.Scene;
   camera: THREE.OrthographicCamera;
-  actor: THREE.Mesh;
-  armL: THREE.Mesh;
-  armR: THREE.Mesh;
+  actor: THREE.Group;
+  arms: THREE.Mesh;
   flash: THREE.Mesh;
   pegRoot: THREE.Group;
   backdrop: THREE.Group;
@@ -106,14 +101,10 @@ function bootScene(): {
   const pegRoot = new THREE.Group();
   scene.add(pegRoot);
 
-  const armL = makeArm();
-  const armR = makeArm();
-  scene.add(armL, armR);
+  const arms = makeArms();
+  scene.add(arms);
 
-  const actor = new THREE.Mesh(
-    new THREE.CircleGeometry(BODY_RADIUS, 28),
-    new THREE.MeshBasicMaterial({ color: 0xf2c14e, side: THREE.DoubleSide }),
-  );
+  const actor = makeMonkey();
   scene.add(actor);
 
   const flash = new THREE.Mesh(
@@ -127,7 +118,70 @@ function bootScene(): {
   );
   scene.add(flash);
 
-  return { scene, camera, actor, armL, armR, flash, pegRoot, backdrop, jungle };
+  return { scene, camera, actor, arms, flash, pegRoot, backdrop, jungle };
+}
+
+/**
+ * Local +y is down the screen. The face art is the head only. Pupils sit in the
+ * blank eyes. Feet sit under the chin. Arms are a separate pair.
+ */
+function makeMonkey(): THREE.Group {
+  const { headW, headH } = monkeySize();
+  // Slot art is 73×28. Its pupil centers are 48px apart; the face eyes are 58px apart.
+  const eyeW = headW * ((58 / 48) * 73) / FACE_W;
+  const eyeH = eyeW * (28 / 73);
+  const footW = headW * 0.22;
+  const footH = footW * (52 / 48);
+
+  const group = new THREE.Group();
+  group.renderOrder = 2;
+  const face = artSprite(faceUrl, headW, headH);
+  const eyes = artSprite(eyesUrl, eyeW, eyeH);
+  // Eye whites are centered near y=72 in the 223px face.
+  eyes.position.set(0, (72 / FACE_H - 0.5) * headH, 0.05);
+  const footL = artSprite(footUrl, footW, footH);
+  const footR = artSprite(footUrl, footW, footH);
+  const footY = (208 / FACE_H - 0.5) * headH;
+  footL.position.set(-headW * 0.2, footY, 0.07);
+  footR.position.set(headW * 0.2, footY, 0.07);
+  group.add(face, eyes, footL, footR);
+  for (const part of group.children) part.renderOrder = 2;
+  return group;
+}
+
+function monkeySize(): { headW: number; headH: number } {
+  const headW = BODY_RADIUS * 2.2;
+  return { headW, headH: headW * (FACE_H / FACE_W) };
+}
+
+/** Both arms, one sprite. Height is 1 design px so scale.y is the stretch. */
+function makeArms(): THREE.Mesh {
+  const width = monkeySize().headW * (ARM_TEX_W / ARM_TEX_H) * 0.55;
+  const arms = artSprite(armsUrl, width, 1);
+  arms.renderOrder = 0;
+  arms.visible = false;
+  return arms;
+}
+
+function artSprite(url: string, width: number, height: number): THREE.Mesh {
+  const map = new THREE.TextureLoader().load(url);
+  map.colorSpace = THREE.SRGBColorSpace;
+  map.flipY = false;
+  map.premultiplyAlpha = true;
+  map.generateMipmaps = false;
+  map.magFilter = THREE.LinearFilter;
+  map.minFilter = THREE.LinearFilter;
+  return new THREE.Mesh(
+    new THREE.PlaneGeometry(width, height),
+    new THREE.MeshBasicMaterial({
+      map,
+      transparent: true,
+      premultipliedAlpha: true,
+      toneMapped: false,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
+  );
 }
 
 /**
@@ -159,92 +213,60 @@ function mountJungle(backdrop: THREE.Group): THREE.Texture {
   return jungle;
 }
 
-/** Hands stay on the peg. The band bows between the peg and one shoulder. */
-function placeArm(
-  arm: THREE.Mesh,
+/**
+ * The whole arm picture runs from inside the head to the peg.
+ * The shoulder end is buried behind the face so the cut never shows.
+ * Hands are the top of the art (plane local -y).
+ * Check: peg straight above the body → rotation.z = 0, local -y points to the peg.
+ */
+function placeArms(
+  arms: THREE.Mesh,
   pegX: number,
   pegY: number,
-  shoulderX: number,
-  shoulderY: number,
-  bow: number,
+  bodyX: number,
+  bodyY: number,
+  spin: number,
+  scaleX: number,
+  scaleY: number,
 ): void {
-  const dx = shoulderX - pegX;
-  const dy = shoulderY - pegY;
+  const { headH } = monkeySize();
+  const cos = Math.cos(spin);
+  const sin = Math.sin(spin);
+  // +y is down. This sits below the crown, inside the head silhouette.
+  const socketY = -headH * 0.05;
+  const ox = -sin * socketY * scaleX;
+  const oy = cos * socketY * scaleY;
+  const dx = pegX - (bodyX + ox);
+  const dy = pegY - (bodyY + oy);
   const length = Math.hypot(dx, dy);
-  arm.visible = length > 1;
+  arms.visible = length > 1;
   if (length <= 1) return;
-  const slack = 1 - Math.min(1, Math.max(0, length - HANG_DROP) / MAX_PULL);
-  const sag = ARM_SAG * (0.35 + 0.65 * slack);
-  const nx = -dy / length;
-  const ny = dx / length;
-  const cx = (pegX + shoulderX) / 2 + nx * sag * bow;
-  const cy = (pegY + shoulderY) / 2 + ny * sag * bow;
-  const half = 2.6;
-  const positions = arm.geometry.getAttribute('position') as THREE.BufferAttribute;
-  for (let i = 0; i <= ARM_SEGMENTS; i += 1) {
-    const t = i / ARM_SEGMENTS;
-    const omt = 1 - t;
-    const x = omt * omt * pegX + 2 * omt * t * cx + t * t * shoulderX;
-    const y = omt * omt * pegY + 2 * omt * t * cy + t * t * shoulderY;
-    const tx = 2 * omt * (cx - pegX) + 2 * t * (shoulderX - cx);
-    const ty = 2 * omt * (cy - pegY) + 2 * t * (shoulderY - cy);
-    const tangent = Math.hypot(tx, ty) || 1;
-    const px = (-ty / tangent) * half;
-    const py = (tx / tangent) * half;
-    positions.setXYZ(i * 2, x + px, y + py, 0.2);
-    positions.setXYZ(i * 2 + 1, x - px, y - py, 0.2);
-  }
-  positions.needsUpdate = true;
-  arm.geometry.computeBoundingSphere();
-  arm.position.set(0, 0, 0);
-  arm.rotation.z = 0;
-  arm.scale.set(1, 1, 1);
-}
-
-function shoulders(peg: Peg, x: number, y: number): [{ x: number; y: number }, { x: number; y: number }] {
-  const dx = x - peg.x;
-  const dy = y - peg.y;
-  const length = Math.hypot(dx, dy) || 1;
-  const ox = (-dy / length) * SHOULDER;
-  const oy = (dx / length) * SHOULDER;
-  return [
-    { x: x + ox, y: y + oy },
-    { x: x - ox, y: y - oy },
-  ];
+  arms.position.set(bodyX + ox + dx / 2, bodyY + oy + dy / 2, 0.2);
+  arms.rotation.z = Math.atan2(dx, -dy);
+  arms.scale.set(1, length, 1);
 }
 
 function makePegView(): PegView {
   const group = new THREE.Group();
-  const shadow = new THREE.Mesh(
-    new THREE.CircleGeometry(12, 16),
-    new THREE.MeshBasicMaterial({
-      color: 0x1a3a22,
-      transparent: true,
-      opacity: 0.28,
-      side: THREE.DoubleSide,
-    }),
-  );
-  shadow.position.set(5, 8, -0.2);
-  shadow.scale.set(1, 0.55, 1);
-  const rim = new THREE.Mesh(
-    new THREE.CircleGeometry(13, 22),
-    new THREE.MeshBasicMaterial({ color: 0x6b4a32, side: THREE.DoubleSide }),
-  );
-  const core = new THREE.Mesh(
-    new THREE.CircleGeometry(9, 22),
-    new THREE.MeshBasicMaterial({ color: 0x7ec8f0, side: THREE.DoubleSide }),
-  );
-  core.position.z = 0.1;
-  group.add(shadow, rim, core);
-  return { group, rim, core };
+  const back = artSprite(pegBackUrl, PEG_W, PEG_H);
+  back.renderOrder = -1;
+  back.position.z = -0.4;
+  const blue = artSprite(pegBlueUrl, PEG_W, PEG_H);
+  const red = artSprite(pegRedUrl, PEG_W, PEG_H);
+  blue.renderOrder = 3;
+  red.renderOrder = 3;
+  blue.position.z = 0.8;
+  red.position.z = 0.8;
+  red.visible = false;
+  group.add(back, blue, red);
+  return { group, blue, red };
 }
 
 function syncView(
   world: SlingWorld,
   camera: THREE.OrthographicCamera,
-  actor: THREE.Mesh,
-  armL: THREE.Mesh,
-  armR: THREE.Mesh,
+  actor: THREE.Group,
+  arms: THREE.Mesh,
   flash: THREE.Mesh,
   pegRoot: THREE.Group,
   pegViews: Map<number, PegView>,
@@ -271,12 +293,18 @@ function syncView(
       world.phase === 'launch') &&
     held;
   if (!showArms || !held) {
-    armL.visible = false;
-    armR.visible = false;
+    arms.visible = false;
   } else {
-    const [left, right] = shoulders(held, world.body.x, world.body.y);
-    placeArm(armL, held.x, held.y, left.x, left.y, 1);
-    placeArm(armR, held.x, held.y, right.x, right.y, -1);
+    placeArms(
+      arms,
+      held.x,
+      held.y,
+      world.body.x,
+      world.body.y,
+      world.body.spin,
+      actor.scale.x,
+      actor.scale.y,
+    );
   }
 
   if (world.flash > 0 && world.leftId >= 0) {
@@ -307,13 +335,9 @@ function syncView(
       pegViews.set(peg.id, view);
     }
     view.group.position.set(peg.x, peg.y, 0);
-    const isHeld =
-      peg.id === world.heldId && world.phase !== 'fly' && world.phase !== 'fall';
     const red = peg.kind === 'red';
-    (view.rim.material as THREE.MeshBasicMaterial).color.setHex(red ? 0x8a3030 : 0x6b4a32);
-    (view.core.material as THREE.MeshBasicMaterial).color.setHex(
-      red ? (isHeld ? 0xff8d7a : 0xe85d4c) : isHeld ? 0xd7f4ff : 0x7ec8f0,
-    );
+    view.red.visible = red;
+    view.blue.visible = !red;
   }
 }
 
@@ -326,7 +350,7 @@ async function boot(): Promise<void> {
   const renderer = await createRenderer({ container: stage });
   renderer.domElement.style.pointerEvents = 'auto';
 
-  const { scene, camera, actor, armL, armR, flash, pegRoot, backdrop, jungle } = bootScene();
+  const { scene, camera, actor, arms, flash, pegRoot, backdrop, jungle } = bootScene();
   const pegViews = new Map<number, PegView>();
 
   let layout: StageLayout | null = null;
@@ -400,7 +424,7 @@ async function boot(): Promise<void> {
     const frameDt = (now - last) / 1000;
     last = now;
     advance(world, frameDt);
-    syncView(world, camera, actor, armL, armR, flash, pegRoot, pegViews, backdrop, jungle);
+    syncView(world, camera, actor, arms, flash, pegRoot, pegViews, backdrop, jungle);
     const pull = Math.round(pullLength(world));
     setStatus(
       `${platform}${native ? ' · native' : ''}\n` +
