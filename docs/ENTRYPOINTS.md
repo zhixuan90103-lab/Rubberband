@@ -21,7 +21,7 @@ index.html
        → game/sling.ts + game/pegs.ts（常数在 game/tune.ts）
        → mountDevicePreview → computeStageLayout → applyStageTransform
        → watchStageLayout
-       → 指针：clientToDesign → tryBeginDrag / dragTo / endDrag
+       → 指针：#stage 盒子 → 设计坐标 → pointerToWorld → tryBeginDrag / dragTo / endDrag
 ```
 
 震动代码还在 `src/utils/haptics.ts`，当前画面没有「点我震动」按钮。真机验收步骤仍见 [HAPTICS.md](./HAPTICS.md)。
@@ -65,5 +65,8 @@ Xcode Run 真机
 | 设计分辨率 | `design.ts` + `style.css` |
 | 震动原生 | `plugins/native-haptics/*.swift` + bootstrap |
 | 启动 HUD | `index.html` + `main.ts` |
+| 拉射规则 | `src/game/tune.ts` · [SLING-KONG-FEEL.md](./SLING-KONG-FEEL.md) §7 |
+| 拉射范围 | [MVP-PLAN.md](./MVP-PLAN.md) |
+| 物理分工 | [PHYSICS-PLAN.md](./PHYSICS-PLAN.md) |
 | 音效（规划） | [AUDIO.md](./AUDIO.md) |
 | 震动接线 | [HAPTICS.md](./HAPTICS.md) |

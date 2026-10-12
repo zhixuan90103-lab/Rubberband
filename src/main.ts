@@ -9,8 +9,8 @@ import {
   DESIGN_HEIGHT,
   DESIGN_WIDTH,
   applyStageTransform,
-  clientToDesign,
   computeStageLayout,
+  isInDesignBounds,
   watchStageLayout,
   type StageLayout,
 } from './adapt/design';
@@ -21,19 +21,26 @@ import {
 import { applyNativeClass, applySafeAreaCssVars } from './adapt/safeArea';
 import { createRenderer } from './create-renderer';
 import { mulberry32 } from './game/pegs';
+import { initPhysics } from './game/sim';
 import {
   advance,
   createWorld,
   dragTo,
   endDrag,
+  pointerToWorld,
   pullLength,
   restart,
   tryBeginDrag,
   type SlingWorld,
 } from './game/sling';
 import {
+  ARM_SAG,
+  BODY_RADIUS,
+  DRAG_BLOCK_Y,
+  HANG_DROP,
   MAX_PULL,
   MIN_PULL,
+  PEG_SCREEN_ANCHOR,
   SHAFT_LEFT,
   SHAFT_RIGHT,
   SHOULDER,
@@ -55,13 +62,22 @@ function makeOrtho(): THREE.OrthographicCamera {
   return camera;
 }
 
+const ARM_SEGMENTS = 10;
+
 function makeArm(): THREE.Mesh {
-  const arm = new THREE.Mesh(
-    new THREE.PlaneGeometry(1, 5),
+  const positions = new Float32Array((ARM_SEGMENTS + 1) * 2 * 3);
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  const indices: number[] = [];
+  for (let i = 0; i < ARM_SEGMENTS; i += 1) {
+    const a = i * 2;
+    indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+  }
+  geometry.setIndex(indices);
+  return new THREE.Mesh(
+    geometry,
     new THREE.MeshBasicMaterial({ color: 0xf4efe4, side: THREE.DoubleSide }),
   );
-  arm.geometry.translate(0.5, 0, 0);
-  return arm;
 }
 
 type PegView = {
@@ -98,6 +114,17 @@ function bootScene(): {
   );
   shaft.position.set((SHAFT_LEFT + SHAFT_RIGHT) / 2, DESIGN_HEIGHT / 2, -0.5);
   backdrop.add(shaft);
+  const anchor = new THREE.Mesh(
+    new THREE.PlaneGeometry(SHAFT_RIGHT - SHAFT_LEFT, 2),
+    new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.85,
+      side: THREE.DoubleSide,
+    }),
+  );
+  anchor.position.set((SHAFT_LEFT + SHAFT_RIGHT) / 2, DESIGN_HEIGHT * PEG_SCREEN_ANCHOR, 0.15);
+  backdrop.add(anchor);
   scene.add(backdrop);
 
   const pegRoot = new THREE.Group();
@@ -108,7 +135,7 @@ function bootScene(): {
   scene.add(armL, armR);
 
   const actor = new THREE.Mesh(
-    new THREE.CircleGeometry(20, 28),
+    new THREE.CircleGeometry(BODY_RADIUS, 28),
     new THREE.MeshBasicMaterial({ color: 0xf2c14e, side: THREE.DoubleSide }),
   );
   scene.add(actor);
@@ -127,14 +154,46 @@ function bootScene(): {
   return { scene, camera, actor, armL, armR, flash, pegRoot, backdrop };
 }
 
-function placeArm(arm: THREE.Mesh, x0: number, y0: number, x1: number, y1: number): void {
-  const dx = x1 - x0;
-  const dy = y1 - y0;
+/** Hands stay on the peg. The band bows between the peg and one shoulder. */
+function placeArm(
+  arm: THREE.Mesh,
+  pegX: number,
+  pegY: number,
+  shoulderX: number,
+  shoulderY: number,
+  bow: number,
+): void {
+  const dx = shoulderX - pegX;
+  const dy = shoulderY - pegY;
   const length = Math.hypot(dx, dy);
   arm.visible = length > 1;
-  arm.position.set(x0, y0, 0.2);
-  arm.scale.set(Math.max(length, 0.001), 1, 1);
-  arm.rotation.z = Math.atan2(dy, dx);
+  if (length <= 1) return;
+  const slack = 1 - Math.min(1, Math.max(0, length - HANG_DROP) / MAX_PULL);
+  const sag = ARM_SAG * (0.35 + 0.65 * slack);
+  const nx = -dy / length;
+  const ny = dx / length;
+  const cx = (pegX + shoulderX) / 2 + nx * sag * bow;
+  const cy = (pegY + shoulderY) / 2 + ny * sag * bow;
+  const half = 2.6;
+  const positions = arm.geometry.getAttribute('position') as THREE.BufferAttribute;
+  for (let i = 0; i <= ARM_SEGMENTS; i += 1) {
+    const t = i / ARM_SEGMENTS;
+    const omt = 1 - t;
+    const x = omt * omt * pegX + 2 * omt * t * cx + t * t * shoulderX;
+    const y = omt * omt * pegY + 2 * omt * t * cy + t * t * shoulderY;
+    const tx = 2 * omt * (cx - pegX) + 2 * t * (shoulderX - cx);
+    const ty = 2 * omt * (cy - pegY) + 2 * t * (shoulderY - cy);
+    const tangent = Math.hypot(tx, ty) || 1;
+    const px = (-ty / tangent) * half;
+    const py = (tx / tangent) * half;
+    positions.setXYZ(i * 2, x + px, y + py, 0.2);
+    positions.setXYZ(i * 2 + 1, x - px, y - py, 0.2);
+  }
+  positions.needsUpdate = true;
+  arm.geometry.computeBoundingSphere();
+  arm.position.set(0, 0, 0);
+  arm.rotation.z = 0;
+  arm.scale.set(1, 1, 1);
 }
 
 function shoulders(peg: Peg, x: number, y: number): [{ x: number; y: number }, { x: number; y: number }] {
@@ -197,14 +256,19 @@ function syncView(
   actor.scale.set(1 + squash * 0.35, 1 - squash * 0.4, 1);
 
   const held = world.pegs.find((peg) => peg.id === world.heldId);
-  const showArms = (world.phase === 'hang' || world.phase === 'drag') && held;
+  const showArms =
+    (world.phase === 'hang' ||
+      world.phase === 'drag' ||
+      world.phase === 'return' ||
+      world.phase === 'launch') &&
+    held;
   if (!showArms || !held) {
     armL.visible = false;
     armR.visible = false;
   } else {
     const [left, right] = shoulders(held, world.body.x, world.body.y);
-    placeArm(armL, held.x, held.y, left.x, left.y);
-    placeArm(armR, held.x, held.y, right.x, right.y);
+    placeArm(armL, held.x, held.y, left.x, left.y, 1);
+    placeArm(armR, held.x, held.y, right.x, right.y, -1);
   }
 
   if (world.flash > 0 && world.leftId >= 0) {
@@ -235,7 +299,8 @@ function syncView(
       pegViews.set(peg.id, view);
     }
     view.group.position.set(peg.x, peg.y, 0);
-    const isHeld = peg.id === world.heldId && world.phase !== 'fly';
+    const isHeld =
+      peg.id === world.heldId && world.phase !== 'fly' && world.phase !== 'fall';
     const red = peg.kind === 'red';
     (view.rim.material as THREE.MeshBasicMaterial).color.setHex(red ? 0x8a3030 : 0x6b4a32);
     (view.core.material as THREE.MeshBasicMaterial).color.setHex(
@@ -249,6 +314,7 @@ async function boot(): Promise<void> {
   const native = Capacitor.isNativePlatform();
   const platform = Capacitor.getPlatform();
 
+  await initPhysics();
   const renderer = await createRenderer({ container: stage });
   renderer.domElement.style.pointerEvents = 'auto';
 
@@ -276,27 +342,37 @@ async function boot(): Promise<void> {
     getViewSize: () => preview.getViewSize(),
   });
 
+  // #viewport is CSS-scaled and centered on desktop. Read the stage box so the
+  // pointer survives that transform; then add the scrolling camera.
   const designPoint = (event: PointerEvent): { x: number; y: number } | null => {
     if (!layout) return null;
-    return clientToDesign(event.clientX, event.clientY, layout);
+    const rect = stage.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return null;
+    const x = ((event.clientX - rect.left) / rect.width) * DESIGN_WIDTH;
+    const y = ((event.clientY - rect.top) / rect.height) * DESIGN_HEIGHT;
+    if (!isInDesignBounds(x, y)) return null;
+    return { x, y };
   };
 
   renderer.domElement.addEventListener('pointerdown', (event) => {
-    const point = designPoint(event);
-    if (!point) return;
+    const design = designPoint(event);
+    if (!design) return;
     if (world.phase === 'fall') {
       seed += 1;
       world = createWorld(mulberry32(seed));
       return;
     }
+    if (design.y > DRAG_BLOCK_Y) return;
+    const point = pointerToWorld(world, design.x, design.y);
     if (!tryBeginDrag(world, point.x, point.y)) return;
     renderer.domElement.setPointerCapture(event.pointerId);
   });
 
   renderer.domElement.addEventListener('pointermove', (event) => {
     if (world.phase !== 'drag') return;
-    const point = designPoint(event);
-    if (!point) return;
+    const design = designPoint(event);
+    if (!design) return;
+    const point = pointerToWorld(world, design.x, design.y);
     dragTo(world, point.x, point.y);
   });
 

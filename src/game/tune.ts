@@ -1,23 +1,56 @@
 /** Design-pixel feel constants. Not measured from the original game. */
 
-export const MAX_PULL = 160;
-/** Pulls shorter than this cancel on release. */
+export const MAX_PULL = 115;
+/**
+ * Extra stretch past the still pose (REST_DROP) that is still too short to launch.
+ * A shorter release eases back under the peg.
+ */
 export const MIN_PULL = 28;
-export const LAUNCH_SCALE = 3.8;
-/** Design +y, which is down the screen. */
-export const GRAVITY = 900;
+/**
+ * Spring rate of the arm as sqrt(k/m), in 1/s.
+ * Extension x (px past HANG_DROP) would reach speed x * LAUNCH_SCALE at slack
+ * with no gravity. With GRAVITY, a full downward pull leaves at about 1280 px/s
+ * and reaches an apex about 580 px up, roughly 0.9 s after detach.
+ */
+export const LAUNCH_SCALE = 11.5;
+/**
+ * Fraction of speed kept when the body catches a peg.
+ * 1 keeps the approach, so the body carries past the peg and the band pulls it back.
+ */
+export const CATCH_KEEP = 1;
+/**
+ * Soft-band rate while hanging, sqrt(k/m), in 1/s.
+ * Tension only past HANG_DROP. A straight hang sags until weight balances.
+ */
+export const ARM_RATE = 7;
+/** How fast the radial bounce dies, 1/s. A few visible rebounds, then rest. */
+export const ARM_DAMP = 2.2;
+/** Tangential drag, 1/s. The body swings past the bottom before it rests. */
+export const SWING_DAMP = 1.15;
+/** How far a slack band bows sideways, in px. A taut band bows less. */
+export const ARM_SAG = 26;
+/** Ease-back time constant when a release stays inside the dead zone. */
+export const RETURN_LAG = 0.08;
+/** Design +y, which is down the screen. A full hop still crests in about 0.9 s. */
+export const GRAVITY = 1400;
 export const GRAB_RADIUS = 36;
-export const GRAB_START_RADIUS = 48;
+/** Wider than the body so a press on the visible circle starts a pull. */
+export const GRAB_START_RADIUS = 64;
 export const OLD_PEG_LOCK = 0.18;
 export const FIXED_DT = 1 / 60;
-export const CAMERA_LAG = 0.12;
-/** Body hangs this far below the peg. Design +y is down. */
-export const HANG_DROP = 78;
+export const CAMERA_LAG = 0.05;
+/**
+ * Slack length. Tension starts past this. Design +y is down.
+ * Weight sags a still body to REST_DROP, which is the pose on screen.
+ */
+export const HANG_DROP = 32;
+/** Peg center to body center when the band is still. About GRAVITY / ARM_RATE² past slack. */
+export const REST_DROP = 61;
 /** Hands sit this far apart on the body. */
-export const SHOULDER = 14;
+export const SHOULDER = 16;
 /**
  * Hanging body rests at this fraction of the design height.
- * Four gaps of about 120px fit above it, and a 160px pull stays on screen.
+ * A full pull (hang plus MAX_PULL) still ends on screen.
  */
 export const PEG_SCREEN_ANCHOR = 0.7;
 /** No new drag starts below this design y (home indicator). */
@@ -25,13 +58,19 @@ export const DRAG_BLOCK_Y = 844 - 34;
 
 export const SHAFT_LEFT = 78;
 export const SHAFT_RIGHT = 312;
+/** Body circle. Matches the actor mesh. Walls stop this radius short of the shaft edge. */
+export const BODY_RADIUS = 36;
+/** Horizontal speed kept after a wall hit. 1 is a perfect bounce. */
+export const WALL_RESTITUTION = 0.9;
 export const SHAFT_CENTER = (SHAFT_LEFT + SHAFT_RIGHT) / 2;
-/** Wider left/right scatter. Still clamped inside the shaft. */
+/** Unused while the layout is two centered pegs. */
 export const PEG_X_SPREAD = 90;
-/** Closer than the old 160–220 so four pegs stay on screen. */
+/** Unused while the layout is two centered pegs. */
 export const PEG_GAP_MIN = 100;
 export const PEG_GAP_MAX = 130;
-/** Pegs kept ahead of the one you hold. */
-export const PEGS_AHEAD = 4;
+/** How many pegs to keep above the one you hold. This layout stops at two total. */
+export const PEGS_AHEAD = 1;
+/** The second peg sits this far above the start peg. Design +y is down. */
+export const PEG_UPPER_GAP = 294;
 /** How often a new peg is red. No dissolve yet. */
 export const RED_PEG_CHANCE = 0.18;

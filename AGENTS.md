@@ -26,6 +26,7 @@
 | 音效方案（未实现） | `docs/AUDIO.md` |
 | 拉射手感常数 | `src/game/tune.ts` · `docs/SLING-KONG-FEEL.md` §7 |
 | 拉射做了什么 | `docs/MVP-PLAN.md` · `src/game/sling.ts` |
+| 物理分工 | `docs/PHYSICS-PLAN.md` |
 
 ## DOM（勿拆）
 

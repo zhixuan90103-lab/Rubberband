@@ -3,13 +3,7 @@
  * Swap the body of `nextPeg` to change the layout rule.
  */
 
-import {
-  PEG_GAP_MAX,
-  PEG_GAP_MIN,
-  PEG_X_SPREAD,
-  RED_PEG_CHANCE,
-  SHAFT_CENTER,
-} from './tune';
+import { PEG_UPPER_GAP, SHAFT_CENTER } from './tune';
 
 export type PegKind = 'blue' | 'red';
 
@@ -33,23 +27,9 @@ export function mulberry32(seed: number): Rng {
   };
 }
 
-function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t;
-}
-
-/**
- * One step up the shaft. `y` decreases because design +y is down.
- * Distance stays inside a full vertical pull plus the grab radius.
- */
-export function nextPeg(prev: Peg, rng: Rng, nextId: number): Peg {
-  const gap = lerp(PEG_GAP_MIN, PEG_GAP_MAX, rng());
-  const spread = (rng() * 2 - 1) * PEG_X_SPREAD;
-  const x = Math.min(
-    SHAFT_CENTER + PEG_X_SPREAD,
-    Math.max(SHAFT_CENTER - PEG_X_SPREAD, prev.x + spread),
-  );
-  const kind: PegKind = rng() < RED_PEG_CHANCE ? 'red' : 'blue';
-  return { id: nextId, x, y: prev.y - gap, kind };
+/** The other peg: shaft center, one fixed gap above the start peg. */
+export function nextPeg(prev: Peg, _rng: Rng, nextId: number): Peg {
+  return { id: nextId, x: SHAFT_CENTER, y: prev.y - PEG_UPPER_GAP, kind: 'blue' };
 }
 
 export function firstPeg(id: number): Peg {

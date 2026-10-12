@@ -71,7 +71,7 @@ offset = 居中
 renderer.setSize(390, 844)          // 始终设计分辨率
 ```
 
-触控：`clientToDesign`；letterbox 外忽略。
+触控：读 `#stage` 的盒子换成设计坐标，再加镜头偏移。Letterbox 外忽略。不要从窗口原点用 `clientToDesign`，桌面预览的视口不在 (0, 0)。
 
 ## 5. Safe Area
 
@@ -134,9 +134,9 @@ npm run cap:sync
 
 玩法坐标是设计像素，y 向下，和 `clientToDesign` 同一套。正交相机 `top = 0`、`bottom = 844`，投影 Y 为负，`FrontSide` 会被裁掉，只剩清屏色。角色、钉子、手臂、竖道用 `DoubleSide`。
 
-`resizeToDesign` 只接受透视相机。这里视锥就是 390×844，不跟窗口，也不用绘图缓冲宽度。跟随只减小 `camera.position.y`。
+`resizeToDesign` 只接受透视相机。这里视锥就是 390×844，不跟窗口，也不用绘图缓冲宽度。跟随只改 `camera.position.y`。镜头锚点是画面高度 70% 的一条白线，挂在跟着镜头走的背景上。
 
-手臂是平移过的细长平面。不要换回 `THREE.Line`，WebGPU 上它只有 1 像素。
+手臂是两条二次曲线带，从钉子弯到肩膀。不要换回 `THREE.Line`，WebGPU 上它只有 1 像素。
 
 `#ui-root` 在画布之上且默认不接指针。`.panel` 会接指针。玩法 HUD 不要再盖住竖道。
 
@@ -159,3 +159,5 @@ npm run cap:sync
 | 2026-08-14 | 增加 HAPTICS.md：震动一次接对 |
 | 2026-08-31 | 真机震动验通。根因：Capacitor 8 `SceneDelegate` 绕过 storyboard。bootstrap 现会改 SceneDelegate；HUD 用「点我震动」+ `plugin` 标志验收 |
 | 2026-10-12 | 拉射替换 demo。正交负 Y 必须 `DoubleSide`。手感数字以 `src/game/tune.ts` 和 SLING-KONG-FEEL §7 为准 |
+| 2026-10-12 | 文档与现行规则对齐：软带悬挂、360° 拉距、身体抓钉、Rapier 只负责收回、飞行和墙 |
+| 2026-10-12 | 两颗钉、抓钉过冲、镜头 70% 白线写入手感、物理和范围文档 |
