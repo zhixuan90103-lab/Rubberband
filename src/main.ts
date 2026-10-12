@@ -40,12 +40,10 @@ import {
   HANG_DROP,
   MAX_PULL,
   MIN_PULL,
-  PEG_SCREEN_ANCHOR,
-  SHAFT_LEFT,
-  SHAFT_RIGHT,
   SHOULDER,
 } from './game/tune';
 import type { Peg } from './game/pegs';
+import bgUrl from './assets/bg-jungle.png';
 
 const stage = document.getElementById('stage')!;
 const shell = document.getElementById('shell')!;
@@ -95,36 +93,14 @@ function bootScene(): {
   flash: THREE.Mesh;
   pegRoot: THREE.Group;
   backdrop: THREE.Group;
+  jungle: THREE.Texture;
 } {
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x16361f);
+  scene.background = new THREE.Color(0x9ed56a);
   const camera = makeOrtho();
 
   const backdrop = new THREE.Group();
-  const walls = new THREE.Mesh(
-    new THREE.PlaneGeometry(DESIGN_WIDTH, DESIGN_HEIGHT),
-    new THREE.MeshBasicMaterial({ color: 0x1d6a34, side: THREE.DoubleSide }),
-  );
-  walls.position.set(DESIGN_WIDTH / 2, DESIGN_HEIGHT / 2, -1);
-  backdrop.add(walls);
-
-  const shaft = new THREE.Mesh(
-    new THREE.PlaneGeometry(SHAFT_RIGHT - SHAFT_LEFT, DESIGN_HEIGHT),
-    new THREE.MeshBasicMaterial({ color: 0xb7e38a, side: THREE.DoubleSide }),
-  );
-  shaft.position.set((SHAFT_LEFT + SHAFT_RIGHT) / 2, DESIGN_HEIGHT / 2, -0.5);
-  backdrop.add(shaft);
-  const anchor = new THREE.Mesh(
-    new THREE.PlaneGeometry(SHAFT_RIGHT - SHAFT_LEFT, 2),
-    new THREE.MeshBasicMaterial({
-      color: 0xffffff,
-      transparent: true,
-      opacity: 0.85,
-      side: THREE.DoubleSide,
-    }),
-  );
-  anchor.position.set((SHAFT_LEFT + SHAFT_RIGHT) / 2, DESIGN_HEIGHT * PEG_SCREEN_ANCHOR, 0.15);
-  backdrop.add(anchor);
+  const jungle = mountJungle(backdrop);
   scene.add(backdrop);
 
   const pegRoot = new THREE.Group();
@@ -151,7 +127,36 @@ function bootScene(): {
   );
   scene.add(flash);
 
-  return { scene, camera, actor, armL, armR, flash, pegRoot, backdrop };
+  return { scene, camera, actor, armL, armR, flash, pegRoot, backdrop, jungle };
+}
+
+/**
+ * One screen-sized plane. The art is 1179×1071 and tiles on the vertical seam.
+ * Width fills the design stage; one copy is DESIGN_WIDTH * (h/w) world pixels tall.
+ * Plane UV v=0 is the screen top (world y = cameraY). flipY stays false so the
+ * file's top row stays at the top of the screen.
+ */
+function mountJungle(backdrop: THREE.Group): THREE.Texture {
+  const jungle = new THREE.TextureLoader().load(bgUrl, (tex) => {
+    const image = tex.image as { width: number; height: number };
+    const tileH = DESIGN_WIDTH * (image.height / image.width);
+    tex.repeat.set(1, DESIGN_HEIGHT / tileH);
+    tex.userData.tileH = tileH;
+    tex.needsUpdate = true;
+  });
+  jungle.colorSpace = THREE.SRGBColorSpace;
+  jungle.flipY = false;
+  jungle.wrapS = THREE.ClampToEdgeWrapping;
+  jungle.wrapT = THREE.RepeatWrapping;
+  jungle.magFilter = THREE.LinearFilter;
+  jungle.minFilter = THREE.LinearFilter;
+  const sheet = new THREE.Mesh(
+    new THREE.PlaneGeometry(DESIGN_WIDTH, DESIGN_HEIGHT),
+    new THREE.MeshBasicMaterial({ map: jungle, toneMapped: false, side: THREE.DoubleSide }),
+  );
+  sheet.position.set(DESIGN_WIDTH / 2, DESIGN_HEIGHT / 2, -1);
+  backdrop.add(sheet);
+  return jungle;
 }
 
 /** Hands stay on the peg. The band bows between the peg and one shoulder. */
@@ -244,11 +249,14 @@ function syncView(
   pegRoot: THREE.Group,
   pegViews: Map<number, PegView>,
   backdrop: THREE.Group,
+  jungle: THREE.Texture,
 ): void {
   camera.position.x = 0;
   camera.position.y = world.cameraY;
   camera.updateMatrixWorld();
   backdrop.position.y = world.cameraY;
+  const tileH = jungle.userData.tileH as number | undefined;
+  if (tileH) jungle.offset.y = world.cameraY / tileH;
 
   const squash = world.squash > 0 ? world.squash / 0.12 : 0;
   actor.position.set(world.body.x, world.body.y, 0.4);
@@ -318,7 +326,7 @@ async function boot(): Promise<void> {
   const renderer = await createRenderer({ container: stage });
   renderer.domElement.style.pointerEvents = 'auto';
 
-  const { scene, camera, actor, armL, armR, flash, pegRoot, backdrop } = bootScene();
+  const { scene, camera, actor, armL, armR, flash, pegRoot, backdrop, jungle } = bootScene();
   const pegViews = new Map<number, PegView>();
 
   let layout: StageLayout | null = null;
@@ -392,7 +400,7 @@ async function boot(): Promise<void> {
     const frameDt = (now - last) / 1000;
     last = now;
     advance(world, frameDt);
-    syncView(world, camera, actor, armL, armR, flash, pegRoot, pegViews, backdrop);
+    syncView(world, camera, actor, armL, armR, flash, pegRoot, pegViews, backdrop, jungle);
     const pull = Math.round(pullLength(world));
     setStatus(
       `${platform}${native ? ' · native' : ''}\n` +

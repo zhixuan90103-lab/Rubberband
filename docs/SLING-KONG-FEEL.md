@@ -120,7 +120,8 @@
 | `OLD_PEG_LOCK` | 0.18 秒 | 从脱开（进入 `fly`）起算。收回期间不算。身体还没离开这颗钉时，锁过期也不抓 |
 | `FIXED_DT` | 1/60 秒 | 飞行和镜头都走这个步长 |
 | `PEG_SCREEN_ANCHOR` | 0.7 | 镜头盯住的横线。静止悬挂点或飞行中的身体中心放在画面高度的 70% |
-| `CAMERA_LAG` | 0.05 秒 | 飞行时镜头追身体。瞄准时镜头停在悬挂点 |
+| `CAMERA_DAMP` | 0.36 秒 | 镜头阻尼时间，启动和停止都用。匀速飞行时人仍在 70% 线上 |
+| `CAMERA_OVERSHOOT` | 6 px | 越过目标后最多再走出这么远 |
 | `DRAG_BLOCK_Y` | 810 | `844 − 34`。低于这条不能新起一次拖动 |
 | `PEG_UPPER_GAP` | 294 px | 上面那颗钉在起点正上方这么远，竖道中线 |
 | `PEGS_AHEAD` | 1 | 起点之上只再放 1 颗，总共两颗 |
@@ -131,7 +132,7 @@
 渲染上同时成立的约定：
 
 - 正交相机是 `left = 0`，`right = 390`，`top = 0`，`bottom = 844`，`near = 0.1`，`far = 50`，相机在 `z = 10`。投影的 Y 系数是负的，正面会被裁掉。角色、钉子、手臂、竖道都用 `MeshBasicMaterial` 的 `DoubleSide`。
-- 镜头只改 `camera.position.y`。画面顶边是 `cameraY`。竖道上有一条 2 px 白线，画在高度 70%，作为镜头锚点。不用 `resizeToDesign`，也不用绘图缓冲的像素尺寸。
+- 镜头只改 `camera.position.y`。画面顶边是 `cameraY`。构图锚点在画面高度 70%，没有画出来。不用 `resizeToDesign`，也不用绘图缓冲的像素尺寸。
 - 手臂不用 `Line`。WebGPU 把 `Line` 画成 1 像素的 `line-strip`。两只手臂各是一条二次曲线带，起点在钉子，终点在肩膀，左右往相反的方向弯。松弛时弯得更多。
 - 命中不用 `Raycaster`。指针先读 `#stage` 的盒子，再换成设计坐标，然后 `pointerToWorld` 加上镜头。Letterbox 外忽略。
 - 收回和飞行的积分在 Rapier 2D。悬挂的软带在 `sling.ts`。状态是 `hang`、`drag`、`return`、`launch`、`fly`、`fall`。

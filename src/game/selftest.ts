@@ -40,7 +40,12 @@ assert(world.phase === 'launch', 'full pull starts the contraction');
 assert(Math.hypot(world.body.vx, world.body.vy) < 1, 'speed is still near zero at release');
 
 let detached = false;
-for (let i = 0; i < 40 && world.phase === 'launch'; i += 1) stepWorld(world, 1 / 60);
+for (let i = 0; i < 40 && world.phase === 'launch'; i += 1) {
+  stepWorld(world, 1 / 60);
+  if (world.phase === 'launch') {
+    assert(world.cameraY <= camBefore + 0.01, 'launch does not drop the camera');
+  }
+}
 detached = world.phase === 'fly' || world.phase === 'hang';
 assert(detached, 'the arm goes slack');
 if (world.phase === 'fly') {

@@ -18,7 +18,6 @@ import {
 import {
   ARM_DAMP,
   ARM_RATE,
-  CAMERA_LAG,
   DRAG_BLOCK_Y,
   FIXED_DT,
   GRAB_RADIUS,
@@ -34,6 +33,8 @@ import {
   PEG_SCREEN_ANCHOR,
   PEGS_AHEAD,
   RETURN_LAG,
+  CAMERA_DAMP,
+  CAMERA_OVERSHOOT,
   BODY_RADIUS,
   SHAFT_LEFT,
   SHAFT_RIGHT,
@@ -71,6 +72,8 @@ export type SlingWorld = {
   squash: number;
   /** Camera world y. Visible design y is world y minus this. */
   cameraY: number;
+  /** Smoothed camera velocity. Kept so a start and a stop ease instead of stepping. */
+  cameraVel: number;
   height: number;
   rng: Rng;
   sim: Sim;
@@ -134,16 +137,58 @@ function placeHang(world: SlingWorld, peg: Peg): void {
   simWrite(world.sim, world.body.x, world.body.y, 0, 0);
 }
 
-function cameraTarget(world: SlingWorld): number {
-  if (world.phase === 'fly' || world.phase === 'launch') return world.body.y - ANCHOR_Y;
-  const peg = pegById(world, world.heldId);
-  return hangPoint(peg).y - ANCHOR_Y;
+/**
+ * Where the framing point should sit. This is the virtual-camera target, not the
+ * rendered camera. Launch never aims below the hang frame, so a pull does not
+ * drag the view down. Past the lowest peg the target holds, so the body can leave.
+ */
+function cameraAim(world: SlingWorld): { y: number; vel: number } {
+  const hangFrame = hangPoint(pegById(world, world.heldId)).y - ANCHOR_Y;
+  if (world.phase !== 'launch' && world.phase !== 'fly') return { y: hangFrame, vel: 0 };
+
+  const bodyFrame = world.body.y - ANCHOR_Y;
+  if (world.phase === 'launch' && bodyFrame > hangFrame) return { y: hangFrame, vel: 0 };
+  if (world.phase === 'fly') {
+    const lowest = world.pegs.reduce((bottom, peg) => (peg.y > bottom.y ? peg : bottom));
+    if (world.body.y > lowest.y + GRAB_RADIUS) {
+      const held = Math.min(bodyFrame, hangPoint(lowest).y - ANCHOR_Y);
+      return { y: held, vel: 0 };
+    }
+  }
+  return { y: bodyFrame, vel: world.body.vy };
 }
 
-function approachCamera(world: SlingWorld, dt: number): void {
-  const target = cameraTarget(world);
-  const t = 1 - Math.exp(-dt / CAMERA_LAG);
-  world.cameraY += (target - world.cameraY) * t;
+/**
+ * Unity's SmoothDamp. Critically damped, so it eases out of a start and into a
+ * stop without overshooting. `smoothTime` is seconds, not a per-frame fraction.
+ */
+function smoothDamp(current: number, target: number, vel: number, smoothTime: number, dt: number): { y: number; vel: number } {
+  const omega = 2 / Math.max(0.0001, smoothTime);
+  const x = omega * dt;
+  const exp = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
+  const change = current - target;
+  const temp = (vel + omega * change) * dt;
+  let nextVel = (vel - omega * temp) * exp;
+  let y = target + (change + temp) * exp;
+  // Shrink a coast past the goal into CAMERA_OVERSHOOT pixels, and slow by the same ratio.
+  const past = y - target;
+  if (past !== 0 && (target - current > 0) === past > 0 && Math.abs(past) > CAMERA_OVERSHOOT) {
+    const scale = CAMERA_OVERSHOOT / Math.abs(past);
+    y = target + past * scale;
+    nextVel *= scale;
+  }
+  return { y, vel: nextVel };
+}
+
+function placeCamera(world: SlingWorld, dt: number): void {
+  if (world.phase === 'fall') return;
+  const aim = cameraAim(world);
+  // Lead by the damp time so a constant speed sits on the body, not behind it.
+  // The lead is zero whenever the aim itself is holding still.
+  const goal = aim.y + aim.vel * CAMERA_DAMP;
+  const next = smoothDamp(world.cameraY, goal, world.cameraVel, CAMERA_DAMP, dt);
+  world.cameraY = next.y;
+  world.cameraVel = next.vel;
 }
 
 export function createWorld(rng: Rng): SlingWorld {
@@ -162,6 +207,7 @@ export function createWorld(rng: Rng): SlingWorld {
     flash: 0,
     squash: 0,
     cameraY: origin.y + REST_DROP - ANCHOR_Y,
+    cameraVel: 0,
     height: 0,
     rng,
     sim: createSim(origin.x, origin.y + REST_DROP),
@@ -393,7 +439,7 @@ export function stepWorld(world: SlingWorld, dt: number): void {
   else if (world.phase === 'launch') stepLaunch(world, dt);
   else if (world.phase === 'fly') stepFly(world, dt);
   else if (world.phase === 'hang') stepHang(world, dt);
-  if (world.phase !== 'fall') approachCamera(world, dt);
+  placeCamera(world, dt);
   // A fast downward shot outruns the camera. Dying at the screen edge
   // skips a peg that is still below the body. Fall only after the body
   // has passed the lowest peg and left the camera.

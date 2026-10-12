@@ -1,5 +1,7 @@
 /** Design-pixel feel constants. Not measured from the original game. */
 
+import { DESIGN_WIDTH } from '../adapt/design';
+
 export const MAX_PULL = 115;
 /**
  * Extra stretch past the still pose (REST_DROP) that is still too short to launch.
@@ -38,7 +40,13 @@ export const GRAB_RADIUS = 36;
 export const GRAB_START_RADIUS = 64;
 export const OLD_PEG_LOCK = 0.18;
 export const FIXED_DT = 1 / 60;
-export const CAMERA_LAG = 0.05;
+/**
+ * Cinemachine-style damp time, in seconds. Same value for flight and for settling
+ * onto a peg. About how long a start or a stop takes. Not a per-frame lerp.
+ */
+export const CAMERA_DAMP = 0.36;
+/** How far the camera may coast past the goal, in design pixels. */
+export const CAMERA_OVERSHOOT = 6;
 /**
  * Slack length. Tension starts past this. Design +y is down.
  * Weight sags a still body to REST_DROP, which is the pose on screen.
@@ -56,8 +64,9 @@ export const PEG_SCREEN_ANCHOR = 0.7;
 /** No new drag starts below this design y (home indicator). */
 export const DRAG_BLOCK_Y = 844 - 34;
 
-export const SHAFT_LEFT = 78;
-export const SHAFT_RIGHT = 312;
+/** Inner face of the side walls. They sit on the design-screen edges. */
+export const SHAFT_LEFT = 0;
+export const SHAFT_RIGHT = DESIGN_WIDTH;
 /** Body circle. Matches the actor mesh. Walls stop this radius short of the shaft edge. */
 export const BODY_RADIUS = 36;
 /** Horizontal speed kept after a wall hit. 1 is a perfect bounce. */

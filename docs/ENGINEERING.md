@@ -134,7 +134,7 @@ npm run cap:sync
 
 玩法坐标是设计像素，y 向下，和 `clientToDesign` 同一套。正交相机 `top = 0`、`bottom = 844`，投影 Y 为负，`FrontSide` 会被裁掉，只剩清屏色。角色、钉子、手臂、竖道用 `DoubleSide`。
 
-`resizeToDesign` 只接受透视相机。这里视锥就是 390×844，不跟窗口，也不用绘图缓冲宽度。跟随只改 `camera.position.y`。镜头锚点是画面高度 70% 的一条白线，挂在跟着镜头走的背景上。
+`resizeToDesign` 只接受透视相机。这里视锥就是 390×844，不跟窗口，也不用绘图缓冲宽度。跟随只改 `camera.position.y`。构图锚点在画面高度 70%，没有单独的线。
 
 手臂是两条二次曲线带，从钉子弯到肩膀。不要换回 `THREE.Line`，WebGPU 上它只有 1 像素。
 
