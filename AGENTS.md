@@ -24,7 +24,8 @@
 | 构建 | `vite.config.ts`（**`base: './'`**） |
 | iOS 注入 | `scripts/bootstrap-ios.mjs` |
 | 音效方案（未实现） | `docs/AUDIO.md` |
-| 拉射手感常数 | `src/game/tune.ts` · `docs/SLING-KONG-FEEL.md` §7 |
+| 拉距、发射、重力、镜头 | `src/game/tune.ts` · `docs/SLING-KONG-FEEL.md` §7 |
+| 抓住后的皮筋、绳子、转角 | `src/game/sling.ts` · `docs/PHYSICS-PLAN.md` |
 | 拉射做了什么 | `docs/MVP-PLAN.md` · `src/game/sling.ts` |
 | 物理分工 | `docs/PHYSICS-PLAN.md` |
 

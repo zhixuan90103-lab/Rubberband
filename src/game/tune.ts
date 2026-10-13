@@ -52,7 +52,7 @@ export const CAMERA_OVERSHOOT = 6;
  * Weight sags a still body to REST_DROP, which is the pose on screen.
  */
 export const HANG_DROP = 32;
-/** Peg center to body center when the band is still. About GRAVITY / ARM_RATE² past slack. */
+/** Peg center to body center when the arm is still. The catch band rests here. */
 export const REST_DROP = 61;
 /** Hands sit this far apart on the body. */
 export const SHOULDER = 16;
