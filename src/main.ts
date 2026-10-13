@@ -312,12 +312,30 @@ function eyePose(time: number): { x: number; y: number; blink: number } {
   return { x, y, blink };
 }
 
+/** Screen-right glance, in face pixels, while a swing is coming or underway. */
+function hangGaze(time: number): number | null {
+  if (time <= 0 || idleBlend < 0.05) return null;
+  ensureHang(time);
+  let i = hangStarts.length - 2;
+  while (i > 0 && hangStarts[i] > time) i -= 1;
+  const g = hangGesture(i);
+  const t = time - hangStarts[i];
+  // +sign swings the body to screen left. Eyes look that way.
+  const look = (sign: number) => -sign * 3.4;
+  if (t < g.charge + g.swing) return look(g.sign);
+  if (g.length - t <= 0.4) return look(hangGesture(i + 1).sign);
+  return null;
+}
+
 function stepEyes(eyes: THREE.Mesh, dt: number): void {
   eyeClock += dt;
   const pose = eyePose(eyeClock);
+  const gaze = hangGaze(idleTime);
   const baseX = eyes.userData.baseX as number;
   const baseY = eyes.userData.baseY as number;
-  eyes.position.set(baseX + pose.x, baseY + pose.y, 0.05);
+  const x = gaze === null ? pose.x : pose.x * (1 - idleBlend) + gaze * idleBlend;
+  const y = gaze === null ? pose.y : pose.y * (1 - idleBlend);
+  eyes.position.set(baseX + x, baseY + y, 0.05);
   eyes.scale.y = 1 - pose.blink * 0.92;
 }
 
@@ -328,6 +346,84 @@ function hangBreath(time: number): number {
   const amp = 2;
   const phase = (time / period) * Math.PI * 2;
   return -amp * 0.5 * (1 - Math.cos(phase));
+}
+
+type HangGesture = {
+  charge: number;
+  /** Damped swings after the release. Ends on a zero crossing. */
+  swing: number;
+  /** Breath only, after this swing, before the next one. */
+  rest: number;
+  /** How far the body leans while gathering. The swing is a multiple of this. */
+  wind: number;
+  peak: number;
+  sign: number;
+  length: number;
+};
+
+type HangMotion = {
+  /** Arc around the peg. The drawn arm follows this. */
+  rock: number;
+  /** Torso only, used while gathering. */
+  lean: number;
+  /** Extra body twist during the swing. It does not move the arms. */
+  whip: number;
+};
+
+const hangStarts = [0];
+
+function hangRand(n: number): number {
+  const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+function hangSmooth(t: number): number {
+  const x = Math.min(1, Math.max(0, t));
+  return x * x * (3 - 2 * x);
+}
+
+function hangGesture(n: number): HangGesture {
+  const wind = 0.14 + hangRand(n * 5) * 0.08;
+  const peak = wind * (1.45 + hangRand(n * 5 + 1) * 0.7);
+  const charge = 0.32 + hangRand(n * 5 + 2) * 0.18;
+  const swing = 1.8;
+  const rest = 2.8 + hangRand(n * 5 + 4) * 2.2;
+  const sign = hangRand(n * 5 + 3) > 0.5 ? 1 : -1;
+  return { charge, swing, rest, wind, peak, sign, length: charge + swing + rest };
+}
+
+function ensureHang(time: number): void {
+  while (hangStarts[hangStarts.length - 1] < time + 1) {
+    const n = hangStarts.length - 1;
+    hangStarts.push(hangStarts[n] + hangGesture(n).length);
+  }
+}
+
+function resetHang(): void {
+  hangStarts.length = 0;
+  hangStarts.push(0);
+}
+
+/** Occasional wind-up and a damped swing. View only; the body stays on the rope. */
+function hangMotion(time: number): HangMotion {
+  if (time <= 0) return { rock: 0, lean: 0, whip: 0 };
+  ensureHang(time);
+  let i = hangStarts.length - 2;
+  while (i > 0 && hangStarts[i] > time) i -= 1;
+  const g = hangGesture(i);
+  let t = time - hangStarts[i];
+  if (t < g.charge) {
+    return { rock: 0, lean: -g.sign * g.wind * hangSmooth(t / g.charge), whip: 0 };
+  }
+  t -= g.charge;
+  if (t >= g.swing) return { rock: 0, lean: 0, whip: 0 };
+  const release = 0.2;
+  const lean = t < release ? -g.sign * g.wind * (1 - hangSmooth(t / release)) : 0;
+  const omega = (Math.PI * 2) / 0.72;
+  const settle = 0.3;
+  const env = t < g.swing - settle ? 1 : 1 - hangSmooth((t - (g.swing - settle)) / settle);
+  const rock = g.sign * g.peak * Math.exp(-2.35 * t) * Math.sin(omega * t) * env;
+  return { rock, lean, whip: rock * 1.65 };
 }
 
 const FOOT_HZ = 2.4;
@@ -575,7 +671,6 @@ function syncView(
 ): void {
   camera.position.x = 0;
   camera.position.y = world.cameraY;
-  stepEyes(eyes, dt);
   camera.updateMatrixWorld();
   backdrop.position.y = world.cameraY;
   const tileH = jungle.userData.tileH as number | undefined;
@@ -596,31 +691,46 @@ function syncView(
   // The drawn angle is always body.spin. Drag and flight ease that value,
   // so the sprite does not swap targets when the phase changes.
   const swingSpeed = Math.hypot(world.body.vx, world.body.vy);
-  // Idle starts only after the rope has stopped. It never orbits the body:
-  // that orbit was a second swing that did not decay.
+  // Both idles start only after the rope has stopped, so they do not
+  // stack on a catch that is still turning or swinging.
   const calm = world.phase === 'hang' && world.catch === null && swingSpeed <= 8;
   idleBlend += ((calm ? 1 : 0) - idleBlend) * (1 - Math.exp(-dt / 0.16));
   if (calm || idleBlend > 0.03) idleTime += dt;
-  else idleTime = 0;
-  // Breath only. A second swing or a torso lean fights the rope and the squared angle.
+  else {
+    idleTime = 0;
+    resetHang();
+  }
   const bob = hangBreath(idleTime) * idleBlend;
-  const poseX = world.body.x;
-  const poseY = world.body.y + bob;
+  const motion = hangMotion(idleTime);
+  stepEyes(eyes, dt);
+  const rock = motion.rock * idleBlend;
+  let poseX = world.body.x;
+  let poseY = world.body.y + bob;
+  if (attached && heldNow && rock !== 0) {
+    const dx = world.body.x - heldNow.x;
+    const dy = world.body.y - heldNow.y;
+    const rc = Math.cos(rock);
+    const rs = Math.sin(rock);
+    poseX = heldNow.x + rc * dx - rs * dy;
+    poseY = heldNow.y + rs * dx + rc * dy + bob;
+  }
   const handX = poseX;
   const handY = poseY;
-  const armFacing = attached ? aim : world.body.spin;
-  const poseFacing = world.body.spin;
+  const armFacing = (attached ? aim : world.body.spin) + rock;
+  const poseFacing = world.body.spin + (motion.lean + motion.whip) * idleBlend;
   actor.position.set(poseX, poseY, 0.4);
   actor.rotation.z = poseFacing;
-  const stretch = Math.min(0.04, Math.abs(bob) * 0.008);
+  const stretch = Math.min(0.07, Math.abs(rock) * 0.28 + Math.abs(bob) * 0.008);
   actor.scale.set((1 + squash * 0.35) * (1 - stretch * 0.65), (1 - squash * 0.4) * (1 + stretch), 1);
   const step = Math.min(Math.max(dt, 0), 1 / 30);
   const cos = Math.cos(poseFacing);
   const sin = Math.sin(poseFacing);
+  const footMotion = hangMotion(Math.max(0, idleTime - 0.12));
+  const footRest = -(footMotion.rock + footMotion.lean + footMotion.whip) * 1.25 * idleBlend;
   for (const foot of feet) {
     const ox = (cos * foot.lx - sin * foot.ly) * actor.scale.x;
     const oy = (sin * foot.lx + cos * foot.ly) * actor.scale.y;
-    stepFoot(foot, poseX + ox, poseY + oy, step, 0);
+    stepFoot(foot, poseX + ox, poseY + oy, step, footRest);
   }
   const { headW, headH } = monkeySize();
   actorShadow.position.set(poseX + headW * 0.12, poseY + headH * 0.17, 0);
