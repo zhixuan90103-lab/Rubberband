@@ -205,6 +205,8 @@ function makeFoot(lx: number, ly: number, width: number, height: number): Foot {
  * the other way. The angle is clamped so it cannot flip over the top.
  */
 let idleTime = 0;
+/** 0 while swinging or airborne, 1 in a settled hang. Fades so the idle does not pop on. */
+let idleBlend = 0;
 let eyeClock = 0;
 const eyeStarts = [0];
 
@@ -388,6 +390,15 @@ function ensureHang(time: number): void {
     const n = hangStarts.length - 1;
     hangStarts.push(hangStarts[n] + hangGesture(n).length);
   }
+}
+
+function scaleMotion(motion: HangMotion, weight: number): HangMotion {
+  return {
+    rock: motion.rock * weight,
+    lean: motion.lean * weight,
+    whip: motion.whip * weight,
+    bob: motion.bob * weight,
+  };
 }
 
 function hangMotion(time: number): HangMotion {
@@ -689,37 +700,37 @@ function syncView(
       world.phase === 'return' ||
       world.phase === 'launch');
   // Local -y is the crown. atan2(dx, -dy) is 0 when the peg is straight above.
-  const facing = attached
+  const aim = heldNow
     ? Math.atan2(heldNow.x - world.body.x, -(heldNow.y - world.body.y))
     : world.body.spin;
-  // Hang idle rocks around the peg on an arc. Feet lag and counter-swing.
-  if (world.phase === 'hang') idleTime += dt;
-  const rocking = world.phase === 'hang';
-  const motion = rocking ? hangMotion(idleTime) : { rock: 0, lean: 0, whip: 0, bob: 0 };
-  const rock = motion.rock;
-  let poseX = world.body.x;
-  let poseY = world.body.y;
-  if (rocking && heldNow) {
-    const dx = world.body.x - heldNow.x;
-    const dy = world.body.y - heldNow.y;
-    const rc = Math.cos(rock);
-    const rs = Math.sin(rock);
-    poseX = heldNow.x + rc * dx - rs * dy;
-    poseY = heldNow.y + rs * dx + rc * dy;
-  }
-  poseY += motion.bob;
-  const armFacing = facing + rock;
-  const poseFacing = armFacing + motion.lean + motion.whip;
+  // The drawn angle is always body.spin. Drag and flight ease that value,
+  // so the sprite does not swap targets when the phase changes.
+  const swingSpeed = Math.hypot(world.body.vx, world.body.vy);
+  // Idle starts only after the rope has stopped. It never orbits the body:
+  // that orbit was a second swing that did not decay.
+  const calm = world.phase === 'hang' && world.catch === null && swingSpeed <= 8;
+  idleBlend += ((calm ? 1 : 0) - idleBlend) * (1 - Math.exp(-dt / 0.16));
+  if (calm || idleBlend > 0.03) idleTime += dt;
+  else idleTime = 0;
+  const motion = scaleMotion(hangMotion(idleTime), idleBlend);
+  const poseX = world.body.x;
+  let poseY = world.body.y + motion.bob;
+  const handX = poseX;
+  const handY = poseY;
+  const armFacing = attached ? aim : world.body.spin;
+  // Lean is the torso gathering. It is not added on top of an arm orbit,
+  // so the crown stays on the arm once the rope is straight.
+  const poseFacing = world.body.spin + motion.lean;
   actor.position.set(poseX, poseY, 0.4);
   actor.rotation.z = poseFacing;
   // Swing stretches the body along the rope. It shortens again as the swing returns.
-  const stretch = Math.min(0.07, Math.abs(rock) * 0.28 + Math.abs(motion.bob) * 0.008);
+  const stretch = Math.min(0.07, Math.abs(motion.lean) * 0.28 + Math.abs(motion.bob) * 0.008);
   actor.scale.set((1 + squash * 0.35) * (1 - stretch * 0.65), (1 - squash * 0.4) * (1 + stretch), 1);
   const step = Math.min(Math.max(dt, 0), 1 / 30);
   const cos = Math.cos(poseFacing);
   const sin = Math.sin(poseFacing);
-  const footMotion = rocking ? hangMotion(idleTime - 0.12) : { rock: 0, lean: 0, whip: 0, bob: 0 };
-  const footRest = -(footMotion.rock + footMotion.lean + footMotion.whip) * 1.25;
+  const footMotion = scaleMotion(hangMotion(Math.max(0, idleTime - 0.12)), idleBlend);
+  const footRest = -footMotion.lean * 1.25;
   for (const foot of feet) {
     const ox = (cos * foot.lx - sin * foot.ly) * actor.scale.x;
     const oy = (sin * foot.lx + cos * foot.ly) * actor.scale.y;
@@ -737,8 +748,8 @@ function syncView(
       arms,
       heldNow.x,
       heldNow.y,
-      poseX,
-      poseY,
+      handX,
+      handY,
       armFacing,
       actor.scale.x,
       actor.scale.y,
@@ -830,6 +841,8 @@ async function boot(): Promise<void> {
     if (world.phase === 'fall') {
       seed += 1;
       world = createWorld(mulberry32(seed));
+      idleTime = 0;
+      idleBlend = 0;
       return;
     }
     if (design.y > DRAG_BLOCK_Y) return;

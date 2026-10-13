@@ -3,6 +3,11 @@ import { initPhysics } from './sim';
 import { createWorld, dragTo, endDrag, pointerToWorld, stepWorld, tryBeginDrag } from './sling';
 import { BODY_RADIUS, GRAB_RADIUS, HANG_DROP, MAX_PULL, MIN_PULL, REST_DROP, SHAFT_LEFT, SHAFT_RIGHT, WALL_RESTITUTION } from './tune';
 
+function shortestSpin(delta: number): number {
+  const tau = Math.PI * 2;
+  return delta - Math.round(delta / tau) * tau;
+}
+
 function assert(cond: boolean, message: string): void {
   if (!cond) throw new Error(message);
 }
@@ -89,12 +94,13 @@ dragTo(down, upper.x, upper.y - (REST_DROP + MAX_PULL));
 endDrag(down);
 for (let i = 0; i < 240 && down.phase !== 'hang' && down.phase !== 'fall'; i += 1) stepWorld(down, 1 / 60);
 assert(down.phase === 'hang' && down.heldId === lower.id, 'a downward shot catches the peg below');
-let past = 0;
-for (let i = 0; i < 20 && down.phase === 'hang'; i += 1) {
-  stepWorld(down, 1 / 60);
-  past = Math.max(past, Math.hypot(down.body.x - lower.x, down.body.y - lower.y));
-}
-assert(past > REST_DROP + 30, 'the catch carries the body past the peg');
+assert(Math.hypot(down.body.x - lower.x, down.body.y - lower.y) < REST_DROP - 8, 'the catch does not snap the arms to full length');
+for (let i = 0; i < 180 && down.phase === 'hang'; i += 1) stepWorld(down, 1 / 60);
+assert(
+  Math.abs(Math.hypot(down.body.x - lower.x, down.body.y - lower.y) - REST_DROP) < 8,
+  'the arms extend back to the hang length',
+);
+assert(down.phase === 'hang', 'the swing stays on the peg');
 
 const angled = createWorld(mulberry32(5));
 const sidePeg = angled.pegs[0];
@@ -123,19 +129,17 @@ const anchor = swing.pegs[0];
 swing.body.x = anchor.x + REST_DROP;
 swing.body.y = anchor.y;
 swing.body.vy = -400;
-let sawRight = false;
-let crossed = false;
+let rose = false;
 let maxReach = 0;
 for (let i = 0; i < 180; i += 1) {
   stepWorld(swing, 1 / 60);
   const x = swing.body.x - anchor.x;
-  if (x > 20) sawRight = true;
-  if (sawRight && x < -20) crossed = true;
+  if (swing.body.y < anchor.y - 10) rose = true;
   maxReach = Math.max(maxReach, Math.hypot(x, swing.body.y - anchor.y));
 }
 assert(swing.phase === 'hang', 'a catch stays on the peg until the player pulls');
-assert(crossed, 'the body rebounds past the peg');
-assert(maxReach < REST_DROP + MAX_PULL + 40, 'the soft band stays bounded');
+assert(rose, 'the incoming speed carries the body up the rope');
+assert(maxReach < REST_DROP + 14, 'the rope stays near the hang length');
 assert(tryBeginDrag(swing, swing.body.x, swing.body.y), 'press interrupts the swing');
 
 const arc = createWorld(mulberry32(5));
@@ -149,6 +153,16 @@ const swung = Math.atan2(arc.body.x - arcPeg.x, arc.body.y - arcPeg.y);
 assert(arc.phase === 'hang', 'an offset hang keeps the rope');
 assert(Math.abs(swung) < 0.7, 'gravity pulls the swing down');
 assert(Math.abs(swung) > 0.05, 'the swing does not stick on the way down');
+arc.body.spin = 1.2;
+arc.body.spinVel = 4;
+for (let i = 0; i < 150; i += 1) stepWorld(arc, 1 / 60);
+const settled = Math.atan2(arc.body.x - arcPeg.x, arc.body.y - arcPeg.y);
+const settledAim = Math.atan2(arcPeg.x - arc.body.x, -(arcPeg.y - arc.body.y));
+let tilt = settledAim - arc.body.spin;
+tilt -= Math.round(tilt / (Math.PI * 2)) * Math.PI * 2;
+assert(Math.abs(settled) < 0.08, 'the rope stops under the peg');
+assert(Math.hypot(arc.body.vx, arc.body.vy) < 1, 'the rope does not keep swinging');
+assert(Math.abs(tilt) < 0.05, 'the body squares onto the arm');
 
 const wall = createWorld(mulberry32(6));
 wall.phase = 'fly';
@@ -160,5 +174,36 @@ assert(wall.phase === 'fly', 'a wall hit does not end the run');
 assert(wall.body.x >= SHAFT_LEFT + BODY_RADIUS - 0.01, 'the body stays inside the shaft');
 assert(wall.body.vx > 0, 'horizontal speed reverses');
 assert(wall.body.vx <= 400 * WALL_RESTITUTION + 1, 'the bounce keeps the restitution');
+assert(Math.abs(wall.body.spinVel) > 5, 'a wall hit adds a tumble');
+
+const rise = createWorld(mulberry32(7));
+const risePeg = rise.pegs[0];
+rise.phase = 'fly';
+rise.body.x = risePeg.x;
+rise.body.y = risePeg.y + GRAB_RADIUS + 40;
+rise.body.vx = 0;
+rise.body.vy = -800;
+rise.body.spin = 0;
+for (let i = 0; i < 30 && String(rise.phase) === 'fly'; i += 1) stepWorld(rise, 1 / 60);
+assert(String(rise.phase) === 'hang', 'an upward arrival catches');
+if (!rise.catch) throw new Error('a catch starts the band');
+const spin0 = rise.body.spin;
+let highest = rise.body.y;
+let longest = 0;
+let fell = false;
+let spun = 0;
+for (let i = 0; i < 240; i += 1) {
+  stepWorld(rise, 1 / 60);
+  spun = Math.max(spun, Math.abs(shortestSpin(rise.body.spin - spin0)));
+  highest = Math.min(highest, rise.body.y);
+  longest = Math.max(longest, Math.hypot(rise.body.x - risePeg.x, rise.body.y - risePeg.y));
+  if (highest < risePeg.y && rise.body.vy > 200) fell = true;
+}
+assert(longest <= REST_DROP * 2 + 1, 'the band stretches at most one extra hang length');
+assert(highest < risePeg.y - 20, 'the body carries above the peg');
+assert(fell, 'the body falls back under gravity');
+assert(spun > 1, 'the body spins about its own center');
+assert(Math.abs(Math.hypot(rise.body.x - risePeg.x, rise.body.y - risePeg.y) - REST_DROP) < 14, 'the arms return to the hang length');
+assert(rise.catch === null, 'the body settles on the hang');
 
 console.log('sling self-test ok');
