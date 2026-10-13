@@ -73,6 +73,6 @@ npm run ios
 
 ## 刻意不做
 
-- 溶解、移动钉、撞墙、障碍、金币、音效（见 `docs/MVP-PLAN.md`）  
+- 溶解、移动钉、额外障碍、金币、音效（见 `docs/MVP-PLAN.md`）。左右墙的反弹已经有了 |  
 - Android（可后加）  
 - WebGL 静默回退  

@@ -37,6 +37,9 @@ import { mountTunePanel } from './game/tunePanel';
 import {
   BODY_RADIUS,
   DRAG_BLOCK_Y,
+  SHAFT_LEFT,
+  SHAFT_RIGHT,
+  armMax,
   feel,
 } from './game/tune';
 import bgUrl from './assets/bg-jungle.png';
@@ -47,6 +50,7 @@ import armsUrl from './assets/art/08-pair-limbs.png';
 import pegBackUrl from './assets/art/03-dark-disc.png';
 import pegBlueUrl from './assets/art/02-blue-ring.png';
 import pegRedUrl from './assets/art/01-pink-ring.png';
+import wallUrl from './assets/art/09-wall-slice.png';
 
 const stage = document.getElementById('stage')!;
 const shell = document.getElementById('shell')!;
@@ -339,6 +343,21 @@ function stepEyes(eyes: THREE.Mesh, dt: number): void {
   eyes.scale.y = 1 - pose.blink * 0.92;
 }
 
+/**
+ * Peg hit, like a ball landing. Local +y is crown to feet.
+ * Contact is flat, the rebound is long, then it settles. The two axes
+ * multiply to 1 so the body keeps its area.
+ */
+function pegImpact(t: number): { along: number; cross: number } {
+  if (t < 0) return { along: 1, cross: 1 };
+  const squash = 0.78;
+  const stretch = 1.16;
+  let along = 1;
+  if (t < 0.08) along = squash + (stretch - squash) * smoothStep(t / 0.08);
+  else if (t < 0.34) along = stretch + (1 - stretch) * smoothStep((t - 0.08) / 0.26);
+  return { along, cross: 1 / along };
+}
+
 /** Settled-hang breath, pixels. +y is down, so this only lifts the body. */
 function hangBreath(time: number): number {
   if (time <= 0) return 0;
@@ -516,11 +535,14 @@ function artSprite(url: string, width: number, height: number): THREE.Mesh {
  * Plane UV v=0 is the screen top (world y = cameraY). flipY stays false so the
  * file's top row stays at the top of the screen.
  */
+/** Uniform scale so a sideways camera shift does not show a gap at the edge. */
+const BG_SCALE = 1.24;
+
 function mountJungle(backdrop: THREE.Group): THREE.Texture {
   const jungle = new THREE.TextureLoader().load(bgUrl, (tex) => {
     const image = tex.image as { width: number; height: number };
-    const tileH = DESIGN_WIDTH * (image.height / image.width);
-    tex.repeat.set(1, DESIGN_HEIGHT / tileH);
+    const tileH = DESIGN_WIDTH * (image.height / image.width) * BG_SCALE;
+    tex.repeat.set(1, (DESIGN_HEIGHT * BG_SCALE) / tileH);
     tex.userData.tileH = tileH;
     tex.needsUpdate = true;
   });
@@ -531,14 +553,143 @@ function mountJungle(backdrop: THREE.Group): THREE.Texture {
   jungle.magFilter = THREE.LinearFilter;
   jungle.minFilter = THREE.LinearFilter;
   const sheet = new THREE.Mesh(
-    new THREE.PlaneGeometry(DESIGN_WIDTH, DESIGN_HEIGHT),
+    new THREE.PlaneGeometry(DESIGN_WIDTH * BG_SCALE, DESIGN_HEIGHT * BG_SCALE),
     new THREE.MeshBasicMaterial({ map: jungle, toneMapped: false, side: THREE.DoubleSide }),
   );
   sheet.position.set(DESIGN_WIDTH / 2, DESIGN_HEIGHT / 2, -1);
   // Opaque and full-screen. A higher renderOrder would paint over the shadows.
   sheet.renderOrder = -3;
   backdrop.add(sheet);
+  mountWalls(backdrop);
   return jungle;
+}
+
+/** Side columns. The slice keeps the rounded frame; the middle stretches. */
+const WALL_TEX_W = 328;
+const WALL_TEX_H = 312;
+const WALL_CAP_SRC = 36;
+const WALL_W = 52;
+const WALL_CAP = 18;
+const WALL_SHADOW = 36;
+/** Pull the inner shadow toward the wall, partly behind it. */
+const WALL_SHADOW_OUT = 24;
+
+/** Extra length above the screen and again below it. */
+const WALL_OVER = 480;
+
+function wallTexture(): THREE.Texture {
+  const map = new THREE.TextureLoader().load(wallUrl);
+  map.colorSpace = THREE.SRGBColorSpace;
+  map.flipY = false;
+  map.premultiplyAlpha = true;
+  map.generateMipmaps = false;
+  map.magFilter = THREE.LinearFilter;
+  map.minFilter = THREE.LinearFilter;
+  map.wrapS = THREE.ClampToEdgeWrapping;
+  map.wrapT = THREE.ClampToEdgeWrapping;
+  return map;
+}
+
+/** +y is down. v=0 is the top of the art and the top of the screen. */
+function nineSliceGeometry(
+  width: number,
+  height: number,
+  cap: number,
+  insetU: number,
+  insetV: number,
+  uMax = 1,
+): THREE.BufferGeometry {
+  const xs = [-width / 2, -width / 2 + cap, width / 2 - cap, width / 2];
+  const ys = [-height / 2, -height / 2 + cap, height / 2 - cap, height / 2];
+  const us = [0, insetU, uMax - insetU, uMax];
+  const vs = [0, insetV, 1 - insetV, 1];
+  const pos: number[] = [];
+  const uv: number[] = [];
+  for (let iy = 0; iy < 4; iy += 1) {
+    for (let ix = 0; ix < 4; ix += 1) {
+      pos.push(xs[ix], ys[iy], 0);
+      uv.push(us[ix], vs[iy]);
+    }
+  }
+  const idx: number[] = [];
+  for (let iy = 0; iy < 3; iy += 1) {
+    for (let ix = 0; ix < 3; ix += 1) {
+      const a = iy * 4 + ix;
+      idx.push(a, a + 4, a + 1, a + 1, a + 4, a + 5);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setIndex(idx);
+  return geo;
+}
+
+function mountWalls(backdrop: THREE.Group): void {
+  const map = wallTexture();
+  // The file's last column is transparent white. Stop half a texel before it.
+  const uMax = (WALL_TEX_W - 1.5) / WALL_TEX_W;
+  const insetU = WALL_CAP_SRC / WALL_TEX_W;
+  const geo = nineSliceGeometry(
+    WALL_W,
+    DESIGN_HEIGHT + WALL_OVER * 2,
+    WALL_CAP,
+    insetU,
+    WALL_CAP_SRC / WALL_TEX_H,
+    uMax,
+  );
+  const material = new THREE.MeshBasicMaterial({
+    map,
+    transparent: true,
+    premultipliedAlpha: true,
+    toneMapped: false,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  const left = new THREE.Mesh(geo, material);
+  const right = new THREE.Mesh(geo, material);
+  left.position.set(SHAFT_LEFT - WALL_W / 2, DESIGN_HEIGHT / 2, -0.5);
+  right.position.set(SHAFT_RIGHT + WALL_W / 2, DESIGN_HEIGHT / 2, -0.5);
+  right.scale.x = -1;
+  left.renderOrder = -1;
+  right.renderOrder = -1;
+
+  const shade = document.createElement('canvas');
+  shade.width = 64;
+  shade.height = 4;
+  const shadeCtx = shade.getContext('2d');
+  if (shadeCtx) {
+    const solid = shade.width * 0.8;
+    shadeCtx.fillStyle = 'rgba(62, 42, 32, 0.7)';
+    shadeCtx.fillRect(0, 0, solid, shade.height);
+    const fade = shadeCtx.createLinearGradient(solid, 0, shade.width, 0);
+    fade.addColorStop(0, 'rgba(62, 42, 32, 0.7)');
+    fade.addColorStop(1, 'rgba(62, 42, 32, 0)');
+    shadeCtx.fillStyle = fade;
+    shadeCtx.fillRect(solid, 0, shade.width - solid, shade.height);
+  }
+  const shadowMap = new THREE.CanvasTexture(shade);
+  shadowMap.colorSpace = THREE.SRGBColorSpace;
+  shadowMap.flipY = false;
+  shadowMap.magFilter = THREE.LinearFilter;
+  shadowMap.minFilter = THREE.LinearFilter;
+  const shadowMat = new THREE.MeshBasicMaterial({
+    map: shadowMap,
+    transparent: true,
+    toneMapped: false,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  const shadowGeo = new THREE.PlaneGeometry(WALL_SHADOW, DESIGN_HEIGHT + WALL_OVER * 2);
+  const leftShadow = new THREE.Mesh(shadowGeo, shadowMat);
+  const rightShadow = new THREE.Mesh(shadowGeo, shadowMat);
+  leftShadow.position.set(WALL_SHADOW / 2 - WALL_SHADOW_OUT + SHAFT_LEFT, DESIGN_HEIGHT / 2, -0.7);
+  rightShadow.position.set(DESIGN_WIDTH - WALL_SHADOW / 2 + WALL_SHADOW_OUT - SHAFT_LEFT, DESIGN_HEIGHT / 2, -0.7);
+  rightShadow.scale.x = -1;
+  leftShadow.renderOrder = -2;
+  rightShadow.renderOrder = -2;
+
+  backdrop.add(leftShadow, rightShadow, left, right);
 }
 
 /**
@@ -669,14 +820,14 @@ function syncView(
   backdrop: THREE.Group,
   jungle: THREE.Texture,
 ): void {
-  camera.position.x = 0;
+  camera.position.x = world.cameraX;
   camera.position.y = world.cameraY;
   camera.updateMatrixWorld();
   backdrop.position.y = world.cameraY;
   const tileH = jungle.userData.tileH as number | undefined;
   if (tileH) jungle.offset.y = world.cameraY / tileH;
 
-  const squash = world.squash > 0 ? world.squash / 0.12 : 0;
+  const impact = pegImpact(world.squash);
   const heldNow = world.pegs.find((peg) => peg.id === world.heldId);
   const attached =
     heldNow !== undefined &&
@@ -721,7 +872,19 @@ function syncView(
   actor.position.set(poseX, poseY, 0.4);
   actor.rotation.z = poseFacing;
   const stretch = Math.min(0.07, Math.abs(rock) * 0.28 + Math.abs(bob) * 0.008);
-  actor.scale.set((1 + squash * 0.35) * (1 - stretch * 0.65), (1 - squash * 0.4) * (1 + stretch), 1);
+  // Local +y runs crown to feet. A full pull lengthens that axis to 1.2.
+  let along = 1;
+  if (attached && heldNow) {
+    const reach = Math.hypot(world.body.x - heldNow.x, world.body.y - heldNow.y);
+    const span = Math.max(1, armMax() - feel.restDrop);
+    const pull = Math.min(1, Math.max(0, reach - feel.restDrop) / span);
+    along = 1 + pull * 0.2;
+  }
+  actor.scale.set(
+    impact.cross * (1 - stretch * 0.65),
+    impact.along * (1 + stretch) * along,
+    1,
+  );
   const step = Math.min(Math.max(dt, 0), 1 / 30);
   const cos = Math.cos(poseFacing);
   const sin = Math.sin(poseFacing);
@@ -846,6 +1009,7 @@ async function boot(): Promise<void> {
     if (design.y > DRAG_BLOCK_Y) return;
     const point = pointerToWorld(world, design.x, design.y);
     if (!tryBeginDrag(world, point.x, point.y)) return;
+    dragTo(world, point.x, point.y);
     renderer.domElement.setPointerCapture(event.pointerId);
   });
 

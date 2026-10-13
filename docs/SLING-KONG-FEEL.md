@@ -105,7 +105,7 @@
 渲染上同时成立的约定：
 
 - 正交相机是 `left = 0`，`right = 390`，`top = 0`，`bottom = 844`，`near = 0.1`，`far = 50`，相机在 `z = 10`。投影的 Y 系数是负的，正面会被裁掉。角色、钉子、手臂、竖道都用 `MeshBasicMaterial` 的 `DoubleSide`。
-- 镜头只改 `camera.position.y`。画面顶边是 `cameraY`。构图锚点在画面高度 70%，没有画出来。不用 `resizeToDesign`，也不用绘图缓冲的像素尺寸。
+- 镜头改 `camera.position.x` 和 `camera.position.y`。画面顶边是 `cameraY`。构图锚点在画面高度 70%，没有画出来。左右何时偏移见 [PHYSICS-PLAN.md](./PHYSICS-PLAN.md)。不用 `resizeToDesign`，也不用绘图缓冲的像素尺寸。
 - 手臂不用 `Line`。WebGPU 把 `Line` 画成 1 像素的 `line-strip`。画面上是一张四肢贴图，从钉连到头顶，按钉心到身体的实际距离拉长。物理上仍是一条手臂。
 - 命中不用 `Raycaster`。指针先读 `#stage` 的盒子，再换成设计坐标，然后 `pointerToWorld` 加上镜头。Letterbox 外忽略。
 - 抓住、悬挂、飞行和墙在 Rapier 2D。发射的出手速率在 `sling.ts` 里按拉长量直接给出，不靠积分攒出来。状态是 `hang`、`drag`、`return`、`launch`、`fly`、`fall`。

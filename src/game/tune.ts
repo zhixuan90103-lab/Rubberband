@@ -39,17 +39,17 @@ export type Feel = {
 };
 
 export const feelDefaults: Feel = {
-  restDrop: 61,
+  restDrop: 60,
   maxPull: 84,
   minPull: 25,
   armOmega: 26,
-  radialDamp: 16.6,
-  tangentDamp: 8,
+  radialDamp: 17,
+  tangentDamp: 9,
   gravity: 4000,
   grabRadius: 36,
-  grabStartRadius: 64,
+  grabStartRadius: 120,
   oldPegLock: 0.18,
-  wallRestitution: 0.9,
+  wallRestitution: 0.3,
   cameraDamp: 0.36,
   cameraOvershoot: 6,
   pegAnchor: 0.7,
@@ -83,14 +83,26 @@ export const ARM_SAG = 26;
 /** No new drag starts below this design y (home indicator). */
 export const DRAG_BLOCK_Y = 844 - 34;
 
-/** Inner face of the side walls. They sit on the design-screen edges. */
-export const SHAFT_LEFT = 0;
-export const SHAFT_RIGHT = DESIGN_WIDTH;
+/**
+ * Inner face of the side walls. Matches the stone art, which sits this far
+ * outside each design-screen edge.
+ */
+export const WALL_FACE_OUT = 12;
+export const SHAFT_LEFT = -WALL_FACE_OUT;
+export const SHAFT_RIGHT = DESIGN_WIDTH + WALL_FACE_OUT;
 /** Body circle. Matches the actor mesh. Walls stop this radius short of the shaft edge. */
 export const BODY_RADIUS = 36;
 export const SHAFT_CENTER = (SHAFT_LEFT + SHAFT_RIGHT) / 2;
-/** Unused while the layout is two centered pegs. */
-export const PEG_X_SPREAD = 90;
+/** Side pegs sit this far left and right, so the row splits the shaft in four. */
+export const PEG_X_SPREAD = SHAFT_CENTER / 2;
+/**
+ * A held peg inside this distance of the shaft center never shifts the camera
+ * sideways. Pegs are not assumed to sit on the center line.
+ */
+export const CAMERA_HOLD_HALF = 70;
+/** Sideways camera follow while pulling from an outer peg toward the wall. */
+export const CAMERA_X_GAIN = 0.55;
+export const CAMERA_X_MAX = 36;
 /** Unused while the layout is two centered pegs. */
 export const PEG_GAP_MIN = 100;
 export const PEG_GAP_MAX = 130;

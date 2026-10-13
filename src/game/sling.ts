@@ -9,7 +9,7 @@
  */
 
 /** Radians per second added for each px/s of velocity change in a wall hit. */
-import { firstPeg, nextPeg, type Peg, type Rng } from './pegs';
+import { firstPeg, nextPeg, sidePegs, type Peg, type Rng } from './pegs';
 import {
   createSim,
   simApplyArm,
@@ -27,6 +27,10 @@ import {
   feel,
   FIXED_DT,
   PEGS_AHEAD,
+  CAMERA_HOLD_HALF,
+  CAMERA_X_GAIN,
+  CAMERA_X_MAX,
+  SHAFT_CENTER,
   SHAFT_LEFT,
   SHAFT_RIGHT,
 } from './tune';
@@ -80,12 +84,15 @@ export type SlingWorld = {
   pullY: number;
   /** Seconds of the release flash still left. */
   flash: number;
-  /** Seconds of the grab squash still left. */
+  /** Seconds since the peg impact. Negative means no impact pose. */
   squash: number;
   /** Camera world y. Visible design y is world y minus this. */
   cameraY: number;
+  /** Camera world x. A small follow of the body's sideways move. */
+  cameraX: number;
   /** Smoothed camera velocity. Kept so a start and a stop ease instead of stepping. */
   cameraVel: number;
+  cameraVelX: number;
   height: number;
   rng: Rng;
   sim: Sim;
@@ -132,8 +139,13 @@ function fillAhead(world: SlingWorld): void {
 function trimBelow(world: SlingWorld): void {
   if (world.pegs.length <= PEGS_AHEAD + 1) return;
   const floor = world.cameraY + DESIGN_HEIGHT + 80;
+  const bottomY = world.pegs.reduce((y, peg) => Math.max(y, peg.y), -Infinity);
   world.pegs = world.pegs.filter(
-    (peg) => peg.y < floor || peg.id === world.heldId || peg.id === world.leftId,
+    (peg) =>
+      peg.y < floor ||
+      peg.y >= bottomY - 0.5 ||
+      peg.id === world.heldId ||
+      peg.id === world.leftId,
   );
 }
 
@@ -206,15 +218,35 @@ function smoothDamp(current: number, target: number, vel: number, smoothTime: nu
   return { y, vel: nextVel };
 }
 
+/**
+ * Sideways camera. Zero unless the player is pulling an outer peg toward
+ * the nearer wall. The middle is a band around the shaft center, not one peg.
+ * Hang, return, launch, and fly stay centered.
+ */
+function cameraSide(world: SlingWorld): number {
+  if (world.phase !== 'drag') return 0;
+  const held = pegById(world, world.heldId);
+  const fromCenter = held.x - SHAFT_CENTER;
+  if (Math.abs(fromCenter) <= CAMERA_HOLD_HALF) return 0;
+  const past = world.body.x - held.x;
+  const towardWall = fromCenter < 0 ? Math.min(0, past) : Math.max(0, past);
+  return Math.max(-CAMERA_X_MAX, Math.min(CAMERA_X_MAX, towardWall * CAMERA_X_GAIN));
+}
+
 function placeCamera(world: SlingWorld, dt: number): void {
-  if (world.phase === 'fall') return;
-  const aim = cameraAim(world);
-  // Lead by the damp time so a constant speed sits on the body, not behind it.
-  // The lead is zero whenever the aim itself is holding still.
-  const goal = aim.y + aim.vel * feel.cameraDamp;
-  const next = smoothDamp(world.cameraY, goal, world.cameraVel, feel.cameraDamp, dt);
-  world.cameraY = next.y;
-  world.cameraVel = next.vel;
+  if (world.phase !== 'fall') {
+    const aim = cameraAim(world);
+    // Lead by the damp time so a constant speed sits on the body, not behind it.
+    // The lead is zero whenever the aim itself is holding still.
+    const goal = aim.y + aim.vel * feel.cameraDamp;
+    const next = smoothDamp(world.cameraY, goal, world.cameraVel, feel.cameraDamp, dt);
+    world.cameraY = next.y;
+    world.cameraVel = next.vel;
+  }
+  const side = cameraSide(world);
+  const nextX = smoothDamp(world.cameraX, side, world.cameraVelX, feel.cameraDamp, dt);
+  world.cameraX = nextX.y;
+  world.cameraVelX = nextX.vel;
 }
 
 export function createWorld(rng: Rng): SlingWorld {
@@ -233,14 +265,20 @@ export function createWorld(rng: Rng): SlingWorld {
     pullX: 0,
     pullY: 0,
     flash: 0,
-    squash: 0,
+    squash: -1,
     cameraY: origin.y + feel.restDrop - anchorY(),
+    cameraX: 0,
     cameraVel: 0,
+    cameraVelX: 0,
     height: 0,
     rng,
     sim: createSim(origin.x, origin.y + feel.restDrop),
   };
   fillAhead(world);
+  const bottom = world.pegs.reduce((low, peg) => (peg.y > low.y ? peg : low));
+  const sides = sidePegs(bottom, world.nextId);
+  world.nextId += sides.length;
+  world.pegs.push(...sides);
   return world;
 }
 
@@ -258,7 +296,7 @@ export function pointerToWorld(
   x: number,
   y: number,
 ): { x: number; y: number } {
-  return { x, y: y + world.cameraY };
+  return { x: x + world.cameraX, y: y + world.cameraY };
 }
 
 export function tryBeginDrag(world: SlingWorld, x: number, y: number): boolean {
@@ -269,6 +307,7 @@ export function tryBeginDrag(world: SlingWorld, x: number, y: number): boolean {
   if (dx * dx + dy * dy > feel.grabStartRadius * feel.grabStartRadius) return false;
   world.phase = 'drag';
   world.catch = null;
+  world.squash = -1;
   world.body.vx = 0;
   world.body.vy = 0;
   world.pullX = 0;
@@ -350,7 +389,7 @@ function grab(world: SlingWorld, peg: Peg): void {
   let reach = Math.hypot(dx, dy);
   world.phase = 'hang';
   world.heldId = peg.id;
-  world.squash = 0.12;
+  world.squash = 0;
   world.pullX = 0;
   world.pullY = 0;
   if (reach < 1) {
@@ -606,7 +645,10 @@ function heldAim(world: SlingWorld): number {
 
 export function stepWorld(world: SlingWorld, dt: number): void {
   world.flash = Math.max(0, world.flash - dt);
-  world.squash = Math.max(0, world.squash - dt);
+  if (world.squash >= 0) {
+    world.squash += dt;
+    if (world.squash > 0.34) world.squash = -1;
+  }
   // Drag, the dead-zone return, and the launch all show the crown toward the peg.
   // The angle eases there, so letting go continues the same turn into the flight.
   if (world.phase === 'drag' || world.phase === 'return' || world.phase === 'launch') {
