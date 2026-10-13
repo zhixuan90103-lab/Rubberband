@@ -84,6 +84,8 @@ function bootScene(): {
   scene: THREE.Scene;
   camera: THREE.OrthographicCamera;
   actor: THREE.Group;
+  eyes: THREE.Mesh;
+  feet: [Foot, Foot];
   actorShadow: THREE.Mesh;
   arms: THREE.Mesh;
   flash: THREE.Mesh;
@@ -105,8 +107,10 @@ function bootScene(): {
   const arms = makeArms();
   scene.add(arms);
 
-  const actor = makeMonkey();
+  const { group: actor, eyes } = makeMonkey();
   scene.add(actor);
+  const feet = makeFeet();
+  scene.add(feet[0].mesh, feet[1].mesh);
 
   const { headW } = monkeySize();
   const actorShadow = makeShadow(headW * 0.88, headW * 0.88, 0.8, 0.5);
@@ -123,35 +127,355 @@ function bootScene(): {
   );
   scene.add(flash);
 
-  return { scene, camera, actor, actorShadow, arms, flash, pegRoot, backdrop, jungle };
+  return { scene, camera, actor, eyes, feet, actorShadow, arms, flash, pegRoot, backdrop, jungle };
 }
 
 /**
  * Local +y is down the screen. The face art is the head only. Pupils sit in the
- * blank eyes. Feet sit under the chin. Arms are a separate pair.
+ * blank eyes. Feet hang from the chin on their own pendulums. Arms are a separate pair.
  */
-function makeMonkey(): THREE.Group {
+function makeMonkey(): { group: THREE.Group; eyes: THREE.Mesh } {
   const { headW, headH } = monkeySize();
   // Slot art is 73×28. Its pupil centers are 48px apart; the face eyes are 58px apart.
   const eyeW = headW * ((58 / 48) * 73) / FACE_W;
   const eyeH = eyeW * (28 / 73);
-  const footW = headW * 0.22;
-  const footH = footW * (52 / 48);
 
   const group = new THREE.Group();
-  group.renderOrder = 2;
   const face = artSprite(faceUrl, headW, headH);
   const eyes = artSprite(eyesUrl, eyeW, eyeH);
   // Eye whites are centered near y=72 in the 223px face.
   eyes.position.set(0, (72 / FACE_H - 0.5) * headH, 0.05);
-  const footL = artSprite(footUrl, footW, footH);
-  const footR = artSprite(footUrl, footW, footH);
-  const footY = (208 / FACE_H - 0.5) * headH;
-  footL.position.set(-headW * 0.2, footY, 0.07);
-  footR.position.set(headW * 0.2, footY, 0.07);
-  group.add(face, eyes, footL, footR);
+  eyes.userData.baseX = eyes.position.x;
+  eyes.userData.baseY = eyes.position.y;
+  group.add(face, eyes);
   for (const part of group.children) part.renderOrder = 2;
-  return group;
+  return { group, eyes };
+}
+
+type Foot = {
+  mesh: THREE.Mesh;
+  /** Ankle, in the monkey's local frame. +x right, +y down. */
+  lx: number;
+  ly: number;
+  length: number;
+  /** Radians from world-down. Positive swings the toe to the right. */
+  angle: number;
+  vel: number;
+  sx: number;
+  sy: number;
+  vx: number;
+  vy: number;
+  ready: boolean;
+};
+
+function makeFeet(): [Foot, Foot] {
+  const { headW, headH } = monkeySize();
+  const footW = headW * 0.22;
+  const footH = footW * (52 / 48);
+  const ankleY = (208 / FACE_H - 0.5) * headH - footH / 2;
+  const left = makeFoot(-headW * 0.2, ankleY, footW, footH);
+  const right = makeFoot(headW * 0.2, ankleY, footW, footH);
+  return [left, right];
+}
+
+function makeFoot(lx: number, ly: number, width: number, height: number): Foot {
+  const mesh = artSprite(footUrl, width, height);
+  // Body parts are 2. The actor group must stay at 0, or its group order paints over these.
+  mesh.renderOrder = 3;
+  return {
+    mesh,
+    lx,
+    ly,
+    length: height,
+    angle: 0,
+    vel: 0,
+    sx: 0,
+    sy: 0,
+    vx: 0,
+    vy: 0,
+    ready: false,
+  };
+}
+
+/**
+ * One-bone spring, the usual secondary-motion limb.
+ * A free point on a stick can orbit the ankle, so the foot spins forever.
+ * Here the foot is only an angle from world-down. Weight is the spring
+ * pulling that angle back to 0. The ankle's acceleration lags the foot
+ * the other way. The angle is clamped so it cannot flip over the top.
+ */
+let idleTime = 0;
+let eyeClock = 0;
+const eyeStarts = [0];
+
+const EYE_LOOKS: Array<[number, number]> = [
+  [0, 0],
+  [0, 0],
+  [3.4, 0.2],
+  [-3.4, 0.15],
+  [1.6, -2.4],
+  [-1.4, -2.2],
+  [0.3, 2.2],
+  [2.7, -1.6],
+  [-2.8, 1.4],
+  [3.1, 1.5],
+];
+
+function eyeRand(n: number): number {
+  const x = Math.sin(n * 91.7 + 19.2) * 24634.6345;
+  return x - Math.floor(x);
+}
+
+function eyeLook(n: number): [number, number] {
+  return EYE_LOOKS[Math.floor(eyeRand(n * 3) * EYE_LOOKS.length)];
+}
+
+function eyeCue(n: number): {
+  x: number;
+  y: number;
+  out: number;
+  hold: number;
+  back: number;
+  rest: number;
+  blinks: number;
+  blinkAt: number;
+  length: number;
+} {
+  const look = eyeLook(n);
+  const forward = look[0] === 0 && look[1] === 0;
+  const out = forward ? 0 : 0.16 + eyeRand(n * 5 + 1) * 0.06;
+  const hold = forward ? 0.2 + eyeRand(n * 5 + 2) * 0.4 : 0.7 + eyeRand(n * 5 + 2) * 0.65;
+  const back = forward ? 0 : 0.16 + eyeRand(n * 5 + 3) * 0.06;
+  const rest = 0.25 + eyeRand(n * 5 + 4) * 0.7;
+  const roll = eyeRand(n * 5 + 6);
+  const blinks = roll > 0.55 ? 1 : roll > 0.28 ? 2 : 0;
+  const length = out + hold + back + rest;
+  const blinkAt = 0.04 + eyeRand(n * 5 + 7) * Math.max(0.02, length - 0.22);
+  return { x: look[0], y: look[1], out, hold, back, rest, blinks, blinkAt, length };
+}
+
+/** Fast slide, then a small overshoot that settles onto the target. */
+function eyeSnap(t: number): number {
+  const u = Math.min(1, Math.max(0, t));
+  const slide = 1 - (1 - Math.min(1, u / 0.62)) ** 3;
+  const settle = u < 0.62 ? 0 : hangSmooth((u - 0.62) / 0.38);
+  return slide * 1.12 + (1 - 1.12) * settle * (u < 0.62 ? 0 : 1);
+}
+
+function ensureEyes(time: number): void {
+  while (eyeStarts[eyeStarts.length - 1] < time + 0.4) {
+    const n = eyeStarts.length - 1;
+    eyeStarts.push(eyeStarts[n] + eyeCue(n).length);
+  }
+}
+
+function blinkAmount(t: number, duration: number): number {
+  if (t < 0 || t > duration) return 0;
+  const u = t / duration;
+  if (u < 0.38) return hangSmooth(u / 0.38);
+  return 1 - hangSmooth((u - 0.38) / 0.62);
+}
+
+function eyePose(time: number): { x: number; y: number; blink: number } {
+  if (time <= 0) return { x: 0, y: 0, blink: 0 };
+  ensureEyes(time);
+  let i = eyeStarts.length - 2;
+  while (i > 0 && eyeStarts[i] > time) i -= 1;
+  const cue = eyeCue(i);
+  let t = time - eyeStarts[i];
+  let x = 0;
+  let y = 0;
+  if (t < cue.out) {
+    const u = cue.out <= 0 ? 1 : eyeSnap(t / cue.out);
+    x = cue.x * u;
+    y = cue.y * u;
+  } else if ((t -= cue.out) < cue.hold) {
+    x = cue.x;
+    y = cue.y;
+  } else if ((t -= cue.hold) < cue.back) {
+    const u = cue.back <= 0 ? 1 : eyeSnap(t / cue.back);
+    x = cue.x * (1 - u);
+    y = cue.y * (1 - u);
+  }
+  const elapsed = time - eyeStarts[i];
+  let blink = 0;
+  for (let k = 0; k < cue.blinks; k++) {
+    blink = Math.max(blink, blinkAmount(elapsed - cue.blinkAt - k * 0.15, 0.11));
+  }
+  return { x, y, blink };
+}
+
+function stepEyes(eyes: THREE.Mesh, dt: number): void {
+  eyeClock += dt;
+  const pose = eyePose(eyeClock);
+  const baseX = eyes.userData.baseX as number;
+  const baseY = eyes.userData.baseY as number;
+  eyes.position.set(baseX + pose.x, baseY + pose.y, 0.05);
+  eyes.scale.y = 1 - pose.blink * 0.92;
+}
+
+type HangGesture = {
+  charge: number;
+  /** Damped swings after the release. Ends on a zero crossing. */
+  swing: number;
+  /** How far the body leans while gathering. The swing is a multiple of this. */
+  wind: number;
+  peak: number;
+  sign: number;
+  /** In-place breath. No wind-up and no rotation. */
+  breathe: boolean;
+  breathPeriod: number;
+  breathAmp: number;
+  length: number;
+};
+
+type HangMotion = {
+  /** Where the body sits around the peg. Arms follow this line. */
+  rock: number;
+  /** Torso only, used while gathering. */
+  lean: number;
+  /** Extra body twist during the swing. It does not move the arms. */
+  whip: number;
+  /** Vertical breath. +y is down. */
+  bob: number;
+};
+
+const hangStarts = [0];
+
+function hangGesture(n: number): HangGesture {
+  const wind = 0.14 + hangRand(n * 5) * 0.08;
+  const peak = wind * (1.45 + hangRand(n * 5 + 1) * 0.7);
+  const charge = 0.32 + hangRand(n * 5 + 2) * 0.18;
+  const swing = 1.8;
+  const sign = hangRand(n * 5 + 3) > 0.5 ? 1 : -1;
+  const breathe = hangRand(n * 5 + 4) > 0.5;
+  const breathPeriod = 1.15 + hangRand(n * 5 + 1) * 0.3;
+  const breathAmp = 1.6 + hangRand(n * 5 + 3) * 0.8;
+  if (breathe) {
+    const breaths = 2 + Math.floor(hangRand(n * 5 + 2) * 2);
+    return {
+      charge: 0,
+      swing: breaths * breathPeriod,
+      wind: 0,
+      peak: 0,
+      sign: 1,
+      breathe: true,
+      breathPeriod,
+      breathAmp,
+      length: breaths * breathPeriod,
+    };
+  }
+  return {
+    charge,
+    swing,
+    wind,
+    peak,
+    sign,
+    breathe: false,
+    breathPeriod: 0,
+    breathAmp: 0,
+    length: charge + swing,
+  };
+}
+
+function hangSmooth(t: number): number {
+  const x = Math.min(1, Math.max(0, t));
+  return x * x * (3 - 2 * x);
+}
+
+function ensureHang(time: number): void {
+  while (hangStarts[hangStarts.length - 1] < time + 1) {
+    const n = hangStarts.length - 1;
+    hangStarts.push(hangStarts[n] + hangGesture(n).length);
+  }
+}
+
+function hangMotion(time: number): HangMotion {
+  if (time <= 0) return { rock: 0, lean: 0, whip: 0, bob: 0 };
+  ensureHang(time);
+  let i = hangStarts.length - 2;
+  while (i > 0 && hangStarts[i] > time) i -= 1;
+  const g = hangGesture(i);
+  let t = time - hangStarts[i];
+  if (g.breathe) {
+    if (t >= g.swing) return { rock: 0, lean: 0, whip: 0, bob: 0 };
+    const phase = (t / g.breathPeriod) * Math.PI * 2;
+    const side = Math.sin(phase) * Math.sin((Math.PI * t) / g.swing);
+    return {
+      rock: side * 0.02,
+      lean: side * 0.07,
+      whip: 0,
+      bob: -g.breathAmp * 0.5 * (1 - Math.cos(phase)),
+    };
+  }
+  if (t < g.charge) {
+    return { rock: 0, lean: -g.sign * g.wind * hangSmooth(t / g.charge), whip: 0, bob: 0 };
+  }
+  t -= g.charge;
+  if (t >= g.swing) return { rock: 0, lean: 0, whip: 0, bob: 0 };
+  const release = 0.2;
+  const lean = t < release ? -g.sign * g.wind * (1 - hangSmooth(t / release)) : 0;
+  const omega = (Math.PI * 2) / 0.72;
+  const settle = 0.3;
+  const env = t < g.swing - settle ? 1 : 1 - hangSmooth((t - (g.swing - settle)) / settle);
+  const rock = g.sign * g.peak * Math.exp(-2.35 * t) * Math.sin(omega * t) * env;
+  // Same swing as the arms, but the torso goes further and comes back with it.
+  const whip = rock * 1.65;
+  return { rock, lean, whip, bob: 0 };
+}
+
+function hangRand(n: number): number {
+  const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+const FOOT_HZ = 2.4;
+const FOOT_ZETA = 0.85;
+const FOOT_SWING = 0.65;
+
+function stepFoot(foot: Foot, socketX: number, socketY: number, dt: number, rest = 0): void {
+  const jumped = Math.hypot(socketX - foot.sx, socketY - foot.sy) > 100;
+  if (!foot.ready || jumped || dt <= 0) {
+    foot.angle = 0;
+    foot.vel = 0;
+    foot.sx = socketX;
+    foot.sy = socketY;
+    foot.vx = 0;
+    foot.vy = 0;
+    foot.ready = true;
+    placeFoot(foot, socketX, socketY);
+    return;
+  }
+  const vx = (socketX - foot.sx) / dt;
+  const vy = (socketY - foot.sy) / dt;
+  const ax = (vx - foot.vx) / dt;
+  const ay = (vy - foot.vy) / dt;
+  foot.sx = socketX;
+  foot.sy = socketY;
+  foot.vx = vx;
+  foot.vy = vy;
+  // Fictitious force of the moving ankle, tangent to the leg, in rad/s².
+  // Opposite the ankle's acceleration, so a yank to the right leaves the toe behind.
+  const lag = (Math.sin(foot.angle) * ay - Math.cos(foot.angle) * ax) / foot.length;
+  const omega = FOOT_HZ * Math.PI * 2;
+  const accel = -omega * omega * (foot.angle - rest) - 2 * FOOT_ZETA * omega * foot.vel + lag;
+  foot.vel += accel * dt;
+  foot.angle += foot.vel * dt;
+  if (foot.angle > FOOT_SWING) {
+    foot.angle = FOOT_SWING;
+    foot.vel = Math.min(0, foot.vel);
+  } else if (foot.angle < -FOOT_SWING) {
+    foot.angle = -FOOT_SWING;
+    foot.vel = Math.max(0, foot.vel);
+  }
+  placeFoot(foot, socketX, socketY);
+}
+
+function placeFoot(foot: Foot, socketX: number, socketY: number): void {
+  const dx = Math.sin(foot.angle) * foot.length;
+  const dy = Math.cos(foot.angle) * foot.length;
+  foot.mesh.position.set(socketX + dx / 2, socketY + dy / 2, 0.47);
+  foot.mesh.rotation.z = -foot.angle;
 }
 
 function monkeySize(): { headW: number; headH: number } {
@@ -334,9 +658,12 @@ function makePegView(): PegView {
 }
 
 function syncView(
+  dt: number,
   world: SlingWorld,
   camera: THREE.OrthographicCamera,
   actor: THREE.Group,
+  eyes: THREE.Mesh,
+  feet: [Foot, Foot],
   actorShadow: THREE.Mesh,
   arms: THREE.Mesh,
   flash: THREE.Mesh,
@@ -347,37 +674,72 @@ function syncView(
 ): void {
   camera.position.x = 0;
   camera.position.y = world.cameraY;
+  stepEyes(eyes, dt);
   camera.updateMatrixWorld();
   backdrop.position.y = world.cameraY;
   const tileH = jungle.userData.tileH as number | undefined;
   if (tileH) jungle.offset.y = world.cameraY / tileH;
 
   const squash = world.squash > 0 ? world.squash / 0.12 : 0;
-  actor.position.set(world.body.x, world.body.y, 0.4);
-  actor.rotation.z = world.body.spin;
-  actor.scale.set(1 + squash * 0.35, 1 - squash * 0.4, 1);
-  const { headW, headH } = monkeySize();
-  actorShadow.position.set(world.body.x + headW * 0.12, world.body.y + headH * 0.17, 0);
-  actorShadow.rotation.z = 0;
-  actorShadow.scale.set(actor.scale.x, 1, 1);
-
-  const held = world.pegs.find((peg) => peg.id === world.heldId);
-  const showArms =
+  const heldNow = world.pegs.find((peg) => peg.id === world.heldId);
+  const attached =
+    heldNow !== undefined &&
     (world.phase === 'hang' ||
       world.phase === 'drag' ||
       world.phase === 'return' ||
-      world.phase === 'launch') &&
-    held;
-  if (!showArms || !held) {
+      world.phase === 'launch');
+  // Local -y is the crown. atan2(dx, -dy) is 0 when the peg is straight above.
+  const facing = attached
+    ? Math.atan2(heldNow.x - world.body.x, -(heldNow.y - world.body.y))
+    : world.body.spin;
+  // Hang idle rocks around the peg on an arc. Feet lag and counter-swing.
+  if (world.phase === 'hang') idleTime += dt;
+  const rocking = world.phase === 'hang';
+  const motion = rocking ? hangMotion(idleTime) : { rock: 0, lean: 0, whip: 0, bob: 0 };
+  const rock = motion.rock;
+  let poseX = world.body.x;
+  let poseY = world.body.y;
+  if (rocking && heldNow) {
+    const dx = world.body.x - heldNow.x;
+    const dy = world.body.y - heldNow.y;
+    const rc = Math.cos(rock);
+    const rs = Math.sin(rock);
+    poseX = heldNow.x + rc * dx - rs * dy;
+    poseY = heldNow.y + rs * dx + rc * dy;
+  }
+  poseY += motion.bob;
+  const armFacing = facing + rock;
+  const poseFacing = armFacing + motion.lean + motion.whip;
+  actor.position.set(poseX, poseY, 0.4);
+  actor.rotation.z = poseFacing;
+  // Swing stretches the body along the rope. It shortens again as the swing returns.
+  const stretch = Math.min(0.07, Math.abs(rock) * 0.28 + Math.abs(motion.bob) * 0.008);
+  actor.scale.set((1 + squash * 0.35) * (1 - stretch * 0.65), (1 - squash * 0.4) * (1 + stretch), 1);
+  const step = Math.min(Math.max(dt, 0), 1 / 30);
+  const cos = Math.cos(poseFacing);
+  const sin = Math.sin(poseFacing);
+  const footMotion = rocking ? hangMotion(idleTime - 0.12) : { rock: 0, lean: 0, whip: 0, bob: 0 };
+  const footRest = -(footMotion.rock + footMotion.lean + footMotion.whip) * 1.25;
+  for (const foot of feet) {
+    const ox = (cos * foot.lx - sin * foot.ly) * actor.scale.x;
+    const oy = (sin * foot.lx + cos * foot.ly) * actor.scale.y;
+    stepFoot(foot, poseX + ox, poseY + oy, step, footRest);
+  }
+  const { headW, headH } = monkeySize();
+  actorShadow.position.set(poseX + headW * 0.12, poseY + headH * 0.17, 0);
+  actorShadow.rotation.z = 0;
+  actorShadow.scale.set(actor.scale.x, 1, 1);
+
+  if (!attached || !heldNow) {
     arms.visible = false;
   } else {
     placeArms(
       arms,
-      held.x,
-      held.y,
-      world.body.x,
-      world.body.y,
-      world.body.spin,
+      heldNow.x,
+      heldNow.y,
+      poseX,
+      poseY,
+      armFacing,
       actor.scale.x,
       actor.scale.y,
     );
@@ -426,7 +788,7 @@ async function boot(): Promise<void> {
   const renderer = await createRenderer({ container: stage });
   renderer.domElement.style.pointerEvents = 'auto';
 
-  const { scene, camera, actor, actorShadow, arms, flash, pegRoot, backdrop, jungle } = bootScene();
+  const { scene, camera, actor, eyes, feet, actorShadow, arms, flash, pegRoot, backdrop, jungle } = bootScene();
   const pegViews = new Map<number, PegView>();
 
   let layout: StageLayout | null = null;
@@ -500,7 +862,21 @@ async function boot(): Promise<void> {
     const frameDt = (now - last) / 1000;
     last = now;
     advance(world, frameDt);
-    syncView(world, camera, actor, actorShadow, arms, flash, pegRoot, pegViews, backdrop, jungle);
+    syncView(
+      frameDt,
+      world,
+      camera,
+      actor,
+      eyes,
+      feet,
+      actorShadow,
+      arms,
+      flash,
+      pegRoot,
+      pegViews,
+      backdrop,
+      jungle,
+    );
     const pull = Math.round(pullLength(world));
     setStatus(
       `${platform}${native ? ' · native' : ''}\n` +
