@@ -1,51 +1,32 @@
 /**
  * One body, gravity always. Positions are design pixels. +x right, +y down.
  *
- * Every shot angle uses the same three steps. There is no up, down, or
- * sideways variant.
- * 1. Launch. One spring along the arm toward the held peg. The arm goes
- *    slack at HANG_DROP and the body flies.
- * 2. Catch. One one-sided band on whatever peg the body touches. It is
- *    slack inside the hang length, pulls only when stretched, and stops
- *    at one extra hang length. The body spins about its own center
- *    and settles crown-up along the arm. A grab does not owe a full turn.
- * 3. Hang. The same arm, locked at the hang length, returns once and
- *    stops under the peg. The crown squares onto the arm.
+ * The arm pulls only past armSlack() and never pushes. Catch and hang
+ * use that force, plus damping. A launch does not. Its speed is the
+ * undamped spring speed for the release length, in the arm's direction.
+ * Gravity, damping, and how fast the finger moved do not change it.
+ * The body spins about its own center.
  */
 
 /** Radians per second added for each px/s of velocity change in a wall hit. */
-const HIT_SPIN = 0.015;
-
 import { firstPeg, nextPeg, type Peg, type Rng } from './pegs';
 import {
   createSim,
-  simClearJoint,
+  simApplyArm,
   simFree,
   simRead,
-  simSpring,
   simStep,
   simWrite,
   type Sim,
 } from './sim';
 import {
-  CATCH_KEEP,
-  DRAG_BLOCK_Y,
-  FIXED_DT,
-  GRAB_RADIUS,
-  GRAB_START_RADIUS,
-  GRAVITY,
-  HANG_DROP,
-  REST_DROP,
-  LAUNCH_SCALE,
-  MAX_PULL,
-  MIN_PULL,
-  OLD_PEG_LOCK,
-  PEG_SCREEN_ANCHOR,
-  PEGS_AHEAD,
-  RETURN_LAG,
-  CAMERA_DAMP,
-  CAMERA_OVERSHOOT,
+  armMax,
+  armSlack,
   BODY_RADIUS,
+  DRAG_BLOCK_Y,
+  feel,
+  FIXED_DT,
+  PEGS_AHEAD,
   SHAFT_LEFT,
   SHAFT_RIGHT,
 } from './tune';
@@ -109,9 +90,22 @@ export type SlingWorld = {
   rng: Rng;
   sim: Sim;
   catch: Catch | null;
+  /** Set at release. The contraction follows cos(ω t) and lets go at slack. */
+  shot: Shot | null;
 };
 
-const ANCHOR_Y = DESIGN_HEIGHT * PEG_SCREEN_ANCHOR;
+type Shot = {
+  /** Unit vector from the peg out to the hand at release. */
+  outX: number;
+  outY: number;
+  /** Reach past the slack length. Exit speed is armOmega times this. */
+  extension: number;
+  age: number;
+};
+
+function anchorY(): number {
+  return DESIGN_HEIGHT * feel.pegAnchor;
+}
 
 function pegById(world: SlingWorld, id: number): Peg {
   const peg = world.pegs.find((item) => item.id === id);
@@ -152,7 +146,7 @@ function syncFromSim(world: SlingWorld): void {
 }
 
 function hangPoint(peg: Peg): { x: number; y: number } {
-  return { x: peg.x, y: peg.y + REST_DROP };
+  return { x: peg.x, y: peg.y + feel.restDrop };
 }
 
 function placeHang(world: SlingWorld, peg: Peg): void {
@@ -162,9 +156,9 @@ function placeHang(world: SlingWorld, peg: Peg): void {
   world.body.vx = 0;
   world.body.vy = 0;
   world.catch = null;
+  world.shot = null;
   world.pullX = 0;
   world.pullY = 0;
-  simClearJoint(world.sim);
   world.sim.body.setRotation(0, true);
   simWrite(world.sim, world.body.x, world.body.y, 0, 0);
 }
@@ -175,15 +169,15 @@ function placeHang(world: SlingWorld, peg: Peg): void {
  * drag the view down. Past the lowest peg the target holds, so the body can leave.
  */
 function cameraAim(world: SlingWorld): { y: number; vel: number } {
-  const hangFrame = hangPoint(pegById(world, world.heldId)).y - ANCHOR_Y;
+  const hangFrame = hangPoint(pegById(world, world.heldId)).y - anchorY();
   if (world.phase !== 'launch' && world.phase !== 'fly') return { y: hangFrame, vel: 0 };
 
-  const bodyFrame = world.body.y - ANCHOR_Y;
+  const bodyFrame = world.body.y - anchorY();
   if (world.phase === 'launch' && bodyFrame > hangFrame) return { y: hangFrame, vel: 0 };
   if (world.phase === 'fly') {
     const lowest = world.pegs.reduce((bottom, peg) => (peg.y > bottom.y ? peg : bottom));
-    if (world.body.y > lowest.y + GRAB_RADIUS) {
-      const held = Math.min(bodyFrame, hangPoint(lowest).y - ANCHOR_Y);
+    if (world.body.y > lowest.y + feel.grabRadius) {
+      const held = Math.min(bodyFrame, hangPoint(lowest).y - anchorY());
       return { y: held, vel: 0 };
     }
   }
@@ -202,10 +196,10 @@ function smoothDamp(current: number, target: number, vel: number, smoothTime: nu
   const temp = (vel + omega * change) * dt;
   let nextVel = (vel - omega * temp) * exp;
   let y = target + (change + temp) * exp;
-  // Shrink a coast past the goal into CAMERA_OVERSHOOT pixels, and slow by the same ratio.
+  // Shrink a coast past the goal into feel.cameraOvershoot pixels, and slow by the same ratio.
   const past = y - target;
-  if (past !== 0 && (target - current > 0) === past > 0 && Math.abs(past) > CAMERA_OVERSHOOT) {
-    const scale = CAMERA_OVERSHOOT / Math.abs(past);
+  if (past !== 0 && (target - current > 0) === past > 0 && Math.abs(past) > feel.cameraOvershoot) {
+    const scale = feel.cameraOvershoot / Math.abs(past);
     y = target + past * scale;
     nextVel *= scale;
   }
@@ -217,8 +211,8 @@ function placeCamera(world: SlingWorld, dt: number): void {
   const aim = cameraAim(world);
   // Lead by the damp time so a constant speed sits on the body, not behind it.
   // The lead is zero whenever the aim itself is holding still.
-  const goal = aim.y + aim.vel * CAMERA_DAMP;
-  const next = smoothDamp(world.cameraY, goal, world.cameraVel, CAMERA_DAMP, dt);
+  const goal = aim.y + aim.vel * feel.cameraDamp;
+  const next = smoothDamp(world.cameraY, goal, world.cameraVel, feel.cameraDamp, dt);
   world.cameraY = next.y;
   world.cameraVel = next.vel;
 }
@@ -233,17 +227,18 @@ export function createWorld(rng: Rng): SlingWorld {
     leftId: -1,
     leftLock: 0,
     leftCleared: true,
-    body: { x: origin.x, y: origin.y + REST_DROP, vx: 0, vy: 0, spin: 0, spinVel: 0 },
+    body: { x: origin.x, y: origin.y + feel.restDrop, vx: 0, vy: 0, spin: 0, spinVel: 0 },
     catch: null,
+    shot: null,
     pullX: 0,
     pullY: 0,
     flash: 0,
     squash: 0,
-    cameraY: origin.y + REST_DROP - ANCHOR_Y,
+    cameraY: origin.y + feel.restDrop - anchorY(),
     cameraVel: 0,
     height: 0,
     rng,
-    sim: createSim(origin.x, origin.y + REST_DROP),
+    sim: createSim(origin.x, origin.y + feel.restDrop),
   };
   fillAhead(world);
   return world;
@@ -251,7 +246,7 @@ export function createWorld(rng: Rng): SlingWorld {
 
 /** Stretch past the still pose. Zero at rest and while the arm is shorter. */
 export function pullLength(world: SlingWorld): number {
-  return Math.max(0, Math.hypot(world.pullX, world.pullY) - REST_DROP);
+  return Math.max(0, Math.hypot(world.pullX, world.pullY) - feel.restDrop);
 }
 
 /**
@@ -271,7 +266,7 @@ export function tryBeginDrag(world: SlingWorld, x: number, y: number): boolean {
   if (y > DRAG_BLOCK_Y) return false;
   const dx = x - world.body.x;
   const dy = y - world.body.y;
-  if (dx * dx + dy * dy > GRAB_START_RADIUS * GRAB_START_RADIUS) return false;
+  if (dx * dx + dy * dy > feel.grabStartRadius * feel.grabStartRadius) return false;
   world.phase = 'drag';
   world.catch = null;
   world.body.vx = 0;
@@ -287,7 +282,7 @@ export function dragTo(world: SlingWorld, x: number, y: number): void {
   let dx = x - peg.x;
   let dy = y - peg.y;
   const reach = Math.hypot(dx, dy);
-  const maxReach = REST_DROP + MAX_PULL;
+  const maxReach = armMax();
   if (reach > maxReach && reach > 0) {
     const scale = maxReach / reach;
     dx *= scale;
@@ -319,14 +314,23 @@ export function endDrag(world: SlingWorld): void {
   const peg = pegById(world, world.heldId);
   world.pullX = 0;
   world.pullY = 0;
-  if (length < MIN_PULL) {
-    world.phase = 'return';
-    world.body.vx = 0;
-    world.body.vy = 0;
-    return;
-  }
   world.body.vx = 0;
   world.body.vy = 0;
+  simWrite(world.sim, world.body.x, world.body.y, 0, 0);
+  if (length < feel.minPull) {
+    world.shot = null;
+    world.phase = 'return';
+    return;
+  }
+  const dx = world.body.x - peg.x;
+  const dy = world.body.y - peg.y;
+  const reach = Math.hypot(dx, dy) || 1;
+  world.shot = {
+    outX: dx / reach,
+    outY: dy / reach,
+    extension: Math.max(0, reach - armSlack()),
+    age: 0,
+  };
   world.leftId = peg.id;
   world.leftLock = 0;
   world.leftCleared = false;
@@ -336,7 +340,7 @@ export function endDrag(world: SlingWorld): void {
 
 function detach(world: SlingWorld): void {
   world.phase = 'fly';
-  world.leftLock = OLD_PEG_LOCK;
+  world.leftLock = feel.oldPegLock;
   world.leftCleared = false;
 }
 
@@ -349,7 +353,6 @@ function grab(world: SlingWorld, peg: Peg): void {
   world.squash = 0.12;
   world.pullX = 0;
   world.pullY = 0;
-  simClearJoint(world.sim);
   if (reach < 1) {
     const dir = Math.hypot(world.body.vx, world.body.vy) || 1;
     dx = (world.body.vx / dir) * 14;
@@ -358,8 +361,6 @@ function grab(world: SlingWorld, peg: Peg): void {
     world.body.x = peg.x + dx;
     world.body.y = peg.y + dy;
   }
-  world.body.vx *= CATCH_KEEP;
-  world.body.vy *= CATCH_KEEP;
   const speed = Math.hypot(world.body.vx, world.body.vy) || 1;
   world.body.spinVel = 0;
   world.catch = {
@@ -378,72 +379,66 @@ function grab(world: SlingWorld, peg: Peg): void {
   fillAhead(world);
 }
 
-function stepReturn(world: SlingWorld, dt: number): void {
-  const hang = hangPoint(pegById(world, world.heldId));
-  const t = 1 - Math.exp(-dt / RETURN_LAG);
-  world.body.x += (hang.x - world.body.x) * t;
-  world.body.y += (hang.y - world.body.y) * t;
-  world.body.vx = 0;
-  world.body.vy = 0;
-  if (Math.hypot(hang.x - world.body.x, hang.y - world.body.y) < 0.5) {
-    placeHang(world, pegById(world, world.heldId));
-    world.phase = 'hang';
-  }
-}
+const REST_SPEED = 16;
+const REST_ANGLE = 0.06;
 
-/** Arm contracts toward the peg. Slack at HANG_DROP, then the shot is ballistic. */
-function stepLaunch(world: SlingWorld, dt: number): void {
-  world.leftLock = Math.max(0, world.leftLock - dt);
-  const peg = pegById(world, world.heldId);
+/** Park a crossed shot on the slack circle and keep the velocity it already has. */
+function releaseIfSlack(world: SlingWorld, peg: Peg): boolean {
   const dx = world.body.x - peg.x;
   const dy = world.body.y - peg.y;
   const reach = Math.hypot(dx, dy);
-  if (reach <= HANG_DROP) {
-    detach(world);
-    return;
+  if (reach > armSlack()) return false;
+  if (reach > 1e-4) {
+    const scale = armSlack() / reach;
+    world.body.x = peg.x + dx * scale;
+    world.body.y = peg.y + dy * scale;
+    simWrite(world.sim, world.body.x, world.body.y, world.body.vx, world.body.vy);
   }
-  simClearJoint(world.sim);
-  simWrite(world.sim, world.body.x, world.body.y, world.body.vx, world.body.vy);
-  simSpring(world.sim, peg.x, peg.y, LAUNCH_SCALE);
-  simStep(world.sim, dt);
-  syncFromSim(world);
-
-  const nx = world.body.x - peg.x;
-  const ny = world.body.y - peg.y;
-  const next = Math.hypot(nx, ny);
-  if (next <= HANG_DROP && next > 1e-4) {
-    const ninv = 1 / next;
-    world.body.x = peg.x + nx * ninv * HANG_DROP;
-    world.body.y = peg.y + ny * ninv * HANG_DROP;
-    detach(world);
-  }
+  detach(world);
+  return true;
 }
 
-/** One extra hang length. Past this the band is fully stretched. */
-const BAND_MAX = REST_DROP * 2;
-/** sqrt(k) of the band, 1/s. Underdamped so one rebound shows. */
-const BAND_RATE = 14;
-const BAND_DAMP = 18;
-/**
- * Tangential decay on the catch, 1/s. The pendulum rate is about 4.8/s,
- * so this is one shorter swing rather than several. It does not touch
- * the radial spring, so the stretch and rebound stay.
- */
-const CATCH_SWING_DAMP = 5;
+/** Keep the body on the ray once the arm is fully stretched. */
+function clampArm(world: SlingWorld, peg: Peg): void {
+  const dx = world.body.x - peg.x;
+  const dy = world.body.y - peg.y;
+  const reach = Math.hypot(dx, dy);
+  if (reach <= armMax() || reach < 1e-4) return;
+  const nx = dx / reach;
+  const ny = dy / reach;
+  world.body.x = peg.x + nx * armMax();
+  world.body.y = peg.y + ny * armMax();
+  const radial = world.body.vx * nx + world.body.vy * ny;
+  if (radial > 0) {
+    world.body.vx -= radial * nx;
+    world.body.vy -= radial * ny;
+  }
+  simWrite(world.sim, world.body.x, world.body.y, world.body.vx, world.body.vy);
+}
 
 /**
- * Settled hang, after the catch band has cleared.
- * Near-critical damping: the pendulum rate is sqrt(GRAVITY / REST_DROP) ≈ 4.8/s,
- * so 8/s is one short return. Plain gravity. The heavier fall rate pumps a swing.
+ * The arm, while it is on a peg. Launch detaches at armSlack().
+ * A quiet body under the peg latches to the hang pose.
  */
-const ROPE_DAMP = 8;
-const ROPE_REST_SPEED = 16;
-const ROPE_REST_ANGLE = 0.06;
-
-/** Rise uses GRAVITY. Falling adds weight so the drop does not float. */
-function weightGravity(vy: number): number {
-  const fall = Math.min(1, Math.max(0, vy / 160));
-  return GRAVITY * (1 + fall * 0.95);
+function stepAttached(world: SlingWorld, dt: number, release: boolean): void {
+  const peg = pegById(world, world.heldId);
+  if (release && releaseIfSlack(world, peg)) return;
+  simWrite(world.sim, world.body.x, world.body.y, world.body.vx, world.body.vy);
+  simApplyArm(world.sim, peg.x, peg.y, dt);
+  simStep(world.sim, dt);
+  syncFromSim(world);
+  clampArm(world, peg);
+  if (release && releaseIfSlack(world, peg)) return;
+  const dx = world.body.x - peg.x;
+  const dy = world.body.y - peg.y;
+  const reach = Math.hypot(dx, dy);
+  const speed = Math.hypot(world.body.vx, world.body.vy);
+  const angle = Math.atan2(dx, dy);
+  const quiet = speed < REST_SPEED && Math.abs(angle) < REST_ANGLE && Math.abs(reach - feel.restDrop) < 4;
+  if (!release && !world.catch && quiet && world.body.y > peg.y) {
+    placeHang(world, peg);
+    if (world.phase === 'return') world.phase = 'hang';
+  }
 }
 
 /**
@@ -461,87 +456,17 @@ function catchSpin(dx: number, dy: number, vx: number, vy: number): number {
   return sign * Math.min(8, kick);
 }
 
-type Arm = {
-  rest: number;
-  /** 0 does not clamp. */
-  max: number;
-  /** 0 locks the length to rest. Otherwise a one-sided spring past rest. */
-  rate: number;
-  radialDamp: number;
-  tangentDamp: number;
-};
-
-/**
- * The arm, for a catch and for a settled hang. Gravity is applied by the caller.
- * The body is already moved for this step.
- */
-function stepArm(body: Body, peg: Peg, dt: number, arm: Arm): { dx: number; dy: number; reach: number } {
-  let dx = body.x - peg.x;
-  let dy = body.y - peg.y;
-  let reach = Math.hypot(dx, dy);
-  if (arm.max > 0 && reach > arm.max && reach > 1e-4) {
-    const prevX = body.x - body.vx * dt;
-    const prevY = body.y - body.vy * dt;
-    const inv = arm.max / reach;
-    body.x = peg.x + dx * inv;
-    body.y = peg.y + dy * inv;
-    body.vx = (body.x - prevX) / dt;
-    body.vy = (body.y - prevY) / dt;
-    dx = body.x - peg.x;
-    dy = body.y - peg.y;
-    reach = arm.max;
-  }
-  if (reach > 1e-4 && arm.rate === 0) {
-    const inv = 1 / reach;
-    body.x = peg.x + dx * inv * arm.rest;
-    body.y = peg.y + dy * inv * arm.rest;
-    dx = body.x - peg.x;
-    dy = body.y - peg.y;
-    reach = arm.rest;
-    const nx = dx / reach;
-    const ny = dy / reach;
-    const radial = body.vx * nx + body.vy * ny;
-    body.vx -= radial * nx;
-    body.vy -= radial * ny;
-  } else if (reach > arm.rest && reach > 1e-4 && arm.rate > 0) {
-    const nx = dx / reach;
-    const ny = dy / reach;
-    const radial = body.vx * nx + body.vy * ny;
-    const pull = arm.rate * arm.rate * (reach - arm.rest);
-    const next = radial + (-pull - arm.radialDamp * radial - GRAVITY * ny) * dt;
-    body.vx += (next - radial) * nx;
-    body.vy += (next - radial) * ny;
-  }
-  if (reach > 1e-4 && arm.tangentDamp > 0) {
-    const nx = dx / reach;
-    const ny = dy / reach;
-    const radial = body.vx * nx + body.vy * ny;
-    const keep = Math.exp(-arm.tangentDamp * dt);
-    body.vx = (body.vx - radial * nx) * keep + radial * nx;
-    body.vy = (body.vy - radial * ny) * keep + radial * ny;
-  }
-  return { dx, dy, reach };
-}
-
-/** Gravity, then the catch band. */
+/** The catch pose. Motion is the same arm as a hang. */
 function stepCatch(world: SlingWorld, peg: Peg, dt: number): void {
   if (!world.catch) return;
-  world.body.vy += weightGravity(world.body.vy) * dt;
-  world.body.x += world.body.vx * dt;
-  world.body.y += world.body.vy * dt;
-  const arm = stepArm(world.body, peg, dt, {
-    rest: REST_DROP,
-    max: BAND_MAX,
-    rate: BAND_RATE,
-    radialDamp: BAND_DAMP,
-    tangentDamp: CATCH_SWING_DAMP,
-  });
-  const reach = arm.reach;
-  // One turn covers both the carry past the peg and the fall back.
-  // It does not finish at the top, and it does not rewind on the rebound.
+  stepAttached(world, dt, false);
+  if (!world.catch) return;
+  const dx = world.body.x - peg.x;
+  const dy = world.body.y - peg.y;
+  const reach = Math.hypot(dx, dy);
   const surge = world.body.vx * world.catch.dirX + world.body.vy * world.catch.dirY;
   const hangX = peg.x;
-  const hangY = peg.y + REST_DROP;
+  const hangY = peg.y + feel.restDrop;
   if (world.catch.stage === 'out') {
     const climbed = Math.min(1, Math.max(0, 1 - surge / world.catch.surge0));
     world.catch.progress = Math.max(world.catch.progress, climbed * 0.5);
@@ -554,81 +479,82 @@ function stepCatch(world: SlingWorld, peg: Peg, dt: number): void {
     const returned = Math.min(1, Math.max(0, 1 - left / world.catch.span));
     world.catch.progress = Math.max(world.catch.progress, 0.5 + returned * 0.5);
   }
-  // Reach crown-up before the hang finishes, and do not travel past it.
   const aimed = Math.min(1, world.catch.progress * 1.15);
-  followSpin(world.body, world.catch.spinFrom + world.catch.turn * aimed, dt, 10);
+  followSpin(world.body, world.catch.spinFrom + world.catch.turn * aimed, dt, feel.catchSpin);
   const speed = Math.hypot(world.body.vx, world.body.vy);
-  // Same settle for every side of the peg. The rope then brings the body underneath.
-  // Settle only after the fall-back, under the peg. The top of the carry
-  // is also slow and about one arm away, and must not end the catch.
   const hung =
     world.catch.stage === 'back' &&
     world.body.y > peg.y &&
-    Math.abs(reach - REST_DROP) < 4 &&
+    Math.abs(reach - feel.restDrop) < 4 &&
     speed < 40;
   if (hung) world.catch = null;
-  simWrite(world.sim, world.body.x, world.body.y, world.body.vx, world.body.vy);
 }
 
 function stepHang(world: SlingWorld, dt: number): void {
   const peg = pegById(world, world.heldId);
-  simClearJoint(world.sim);
   if (world.catch) {
     stepCatch(world, peg, dt);
     return;
   }
-  world.body.vy += GRAVITY * dt;
-  world.body.x += world.body.vx * dt;
-  world.body.y += world.body.vy * dt;
-  const arm = stepArm(world.body, peg, dt, {
-    rest: REST_DROP,
-    max: 0,
-    rate: 0,
-    radialDamp: 0,
-    tangentDamp: ROPE_DAMP,
-  });
-  // atan2(x, y) is 0 when the body is straight under the peg.
-  const hangAngle = Math.atan2(arm.dx, arm.dy);
-  const speed = Math.hypot(world.body.vx, world.body.vy);
-  const resting = speed < ROPE_REST_SPEED && Math.abs(hangAngle) < ROPE_REST_ANGLE;
-  if (resting) {
-    world.body.x = peg.x;
-    world.body.y = peg.y + REST_DROP;
-    world.body.vx = 0;
-    world.body.vy = 0;
-  }
-  // Crown up. A downward grab starts crown-down, so the catch turn aims here
-  // and this spring finishes whatever is left without a snap.
+  stepAttached(world, dt, false);
   const before = world.body.spin;
-  easeSpin(world.body, 0, dt, 8);
+  easeSpin(world.body, 0, dt, feel.settleSpin);
   if (before * world.body.spin < 0) {
     world.body.spin = 0;
     world.body.spinVel = 0;
   }
+}
+
+function stepLaunch(world: SlingWorld, dt: number): void {
+  world.leftLock = Math.max(0, world.leftLock - dt);
+  const shot = world.shot;
+  const peg = pegById(world, world.heldId);
+  if (!shot || shot.extension <= 0) {
+    world.shot = null;
+    detach(world);
+    return;
+  }
+  shot.age += dt;
+  const omega = feel.armOmega;
+  const phase = omega * shot.age;
+  const slack = armSlack();
+  const done = phase >= Math.PI / 2;
+  const along = done ? 0 : Math.cos(phase);
+  const reach = slack + shot.extension * along;
+  const speed = omega * shot.extension * (done ? 1 : Math.sin(phase));
+  world.body.x = peg.x + shot.outX * reach;
+  world.body.y = peg.y + shot.outY * reach;
+  world.body.vx = -shot.outX * speed;
+  world.body.vy = -shot.outY * speed;
   simWrite(world.sim, world.body.x, world.body.y, world.body.vx, world.body.vy);
+  if (!done) return;
+  world.shot = null;
+  detach(world);
+}
+
+function stepReturn(world: SlingWorld, dt: number): void {
+  stepAttached(world, dt, false);
 }
 
 function stepFly(world: SlingWorld, dt: number): void {
   world.leftLock = Math.max(0, world.leftLock - dt);
   const vxBefore = world.body.vx;
-  world.body.vy += (weightGravity(world.body.vy) - GRAVITY) * dt;
-  simClearJoint(world.sim);
   simWrite(world.sim, world.body.x, world.body.y, world.body.vx, world.body.vy);
   simStep(world.sim, dt);
   syncFromSim(world);
   if (vxBefore * world.body.vx < 0 && Math.abs(vxBefore) > 80) {
-    world.body.spinVel += (world.body.vx - vxBefore) * HIT_SPIN;
+    world.body.spinVel += (world.body.vx - vxBefore) * feel.hitSpin;
   }
 
   // The arm catches when the body reaches a peg. The peg then becomes the anchor.
   let best: Peg | null = null;
-  let bestDist = GRAB_RADIUS;
+  let bestDist = feel.grabRadius;
   for (const peg of world.pegs) {
     const dx = world.body.x - peg.x;
     const dy = world.body.y - peg.y;
     const dist = Math.hypot(dx, dy);
     if (peg.id === world.leftId) {
-      if (dist > GRAB_RADIUS) world.leftCleared = true;
+      if (dist > feel.grabRadius) world.leftCleared = true;
       if (!world.leftCleared || world.leftLock > 0) continue;
     }
     if (dist <= bestDist) {
@@ -684,7 +610,7 @@ export function stepWorld(world: SlingWorld, dt: number): void {
   // Drag, the dead-zone return, and the launch all show the crown toward the peg.
   // The angle eases there, so letting go continues the same turn into the flight.
   if (world.phase === 'drag' || world.phase === 'return' || world.phase === 'launch') {
-    easeSpin(world.body, heldAim(world), dt, 14);
+    easeSpin(world.body, heldAim(world), dt, feel.aimSpin);
   }
   if (world.phase === 'return') stepReturn(world, dt);
   else if (world.phase === 'launch') stepLaunch(world, dt);
@@ -697,7 +623,7 @@ export function stepWorld(world: SlingWorld, dt: number): void {
   const lowest = world.pegs.reduce((y, peg) => Math.max(y, peg.y), -Infinity);
   if (
     (world.phase === 'fly' || world.phase === 'launch') &&
-    world.body.y > lowest + GRAB_RADIUS &&
+    world.body.y > lowest + feel.grabRadius &&
     world.body.y > world.cameraY + DESIGN_HEIGHT
   ) {
     world.phase = 'fall';

@@ -2,65 +2,84 @@
 
 import { DESIGN_WIDTH } from '../adapt/design';
 
-export const MAX_PULL = 115;
-/**
- * Extra stretch past the still pose (REST_DROP) that is still too short to launch.
- * A shorter release eases back under the peg.
- */
-export const MIN_PULL = 28;
-/**
- * Spring rate of the arm as sqrt(k/m), in 1/s.
- * Extension x (px past HANG_DROP) would reach speed x * LAUNCH_SCALE at slack
- * with no gravity. With GRAVITY, a full downward pull leaves at about 1280 px/s
- * and reaches an apex about 580 px up, roughly 0.9 s after detach.
- */
-export const LAUNCH_SCALE = 11.5;
-/**
- * Fraction of speed kept when the body catches a peg.
- * 1 keeps the approach, so the body carries past the peg and the band pulls it back.
- */
-export const CATCH_KEEP = 1;
-/**
- * Unused by the current arm. Catch and hang rates live next to stepArm
- * in sling.ts (BAND_RATE, CATCH_SWING_DAMP, ROPE_DAMP).
- */
-export const ARM_RATE = 7;
-/** Unused by the current arm. See sling.ts BAND_DAMP. */
-export const ARM_DAMP = 2.2;
-/** Unused by the current arm. See sling.ts CATCH_SWING_DAMP and ROPE_DAMP. */
-export const SWING_DAMP = 1.15;
-/** How far a slack band bows sideways, in px. A taut band bows less. */
-export const ARM_SAG = 26;
-/** Ease-back time constant when a release stays inside the dead zone. */
-export const RETURN_LAG = 0.08;
-/** Design +y, which is down the screen. A full hop still crests in about 0.9 s. */
-export const GRAVITY = 1400;
-export const GRAB_RADIUS = 36;
-/** Wider than the body so a press on the visible circle starts a pull. */
-export const GRAB_START_RADIUS = 64;
-export const OLD_PEG_LOCK = 0.18;
+/** Live monkey feel. The panel writes this. Derived lengths are functions. */
+export type Feel = {
+  /** Hang length. The arm and gravity balance here. */
+  restDrop: number;
+  /** Extra stretch past the hang pose. The arm cannot go farther. */
+  maxPull: number;
+  /** Extra stretch past the hang pose that is still too short to launch. */
+  minPull: number;
+  /** sqrt(k/m), 1/s. One rate for launch, catch, and hang. */
+  armOmega: number;
+  /** Along-arm damping, 1/s. Only while the arm is past the slack length. */
+  radialDamp: number;
+  /** Across-arm damping, 1/s. This is what lets a swing stop. */
+  tangentDamp: number;
+  /** Design +y, down the screen. */
+  gravity: number;
+  grabRadius: number;
+  grabStartRadius: number;
+  /** Seconds before the peg just left can be caught again. */
+  oldPegLock: number;
+  /** Horizontal speed kept after a wall hit. 1 is a perfect bounce. */
+  wallRestitution: number;
+  cameraDamp: number;
+  cameraOvershoot: number;
+  /** Hanging body rests at this fraction of the design height. */
+  pegAnchor: number;
+  /** Radians per second added for each px/s of velocity change in a wall hit. */
+  hitSpin: number;
+  /** Crown turn while aiming and launching, 1/s. */
+  aimSpin: number;
+  /** Crown turn during a catch, 1/s. */
+  catchSpin: number;
+  /** Crown turn once the catch has settled, 1/s. */
+  settleSpin: number;
+};
+
+export const feelDefaults: Feel = {
+  restDrop: 61,
+  maxPull: 84,
+  minPull: 25,
+  armOmega: 26,
+  radialDamp: 16.6,
+  tangentDamp: 8,
+  gravity: 4000,
+  grabRadius: 36,
+  grabStartRadius: 64,
+  oldPegLock: 0.18,
+  wallRestitution: 0.9,
+  cameraDamp: 0.36,
+  cameraOvershoot: 6,
+  pegAnchor: 0.7,
+  hitSpin: 0.015,
+  aimSpin: 14,
+  catchSpin: 10,
+  settleSpin: 8,
+};
+
+export const feel: Feel = { ...feelDefaults };
+
+export function resetFeel(): void {
+  Object.assign(feel, feelDefaults);
+}
+
+/** Zero-force length. restDrop = armSlack + gravity / armOmega². */
+export function armSlack(): number {
+  const omega = feel.armOmega;
+  return feel.restDrop - feel.gravity / (omega * omega);
+}
+
+/** Longest arm, drag and catch. */
+export function armMax(): number {
+  return feel.restDrop + feel.maxPull;
+}
 export const FIXED_DT = 1 / 60;
-/**
- * Cinemachine-style damp time, in seconds. Same value for flight and for settling
- * onto a peg. About how long a start or a stop takes. Not a per-frame lerp.
- */
-export const CAMERA_DAMP = 0.36;
-/** How far the camera may coast past the goal, in design pixels. */
-export const CAMERA_OVERSHOOT = 6;
-/**
- * Slack length. Tension starts past this. Design +y is down.
- * Weight sags a still body to REST_DROP, which is the pose on screen.
- */
-export const HANG_DROP = 32;
-/** Peg center to body center when the arm is still. The catch band rests here. */
-export const REST_DROP = 61;
-/** Hands sit this far apart on the body. */
+/** Hands sit this far apart on the body. Not read by the current actor. */
 export const SHOULDER = 16;
-/**
- * Hanging body rests at this fraction of the design height.
- * A full pull (hang plus MAX_PULL) still ends on screen.
- */
-export const PEG_SCREEN_ANCHOR = 0.7;
+/** How far a slack band bows sideways, in px. Not read by the current actor. */
+export const ARM_SAG = 26;
 /** No new drag starts below this design y (home indicator). */
 export const DRAG_BLOCK_Y = 844 - 34;
 
@@ -69,8 +88,6 @@ export const SHAFT_LEFT = 0;
 export const SHAFT_RIGHT = DESIGN_WIDTH;
 /** Body circle. Matches the actor mesh. Walls stop this radius short of the shaft edge. */
 export const BODY_RADIUS = 36;
-/** Horizontal speed kept after a wall hit. 1 is a perfect bounce. */
-export const WALL_RESTITUTION = 0.9;
 export const SHAFT_CENTER = (SHAFT_LEFT + SHAFT_RIGHT) / 2;
 /** Unused while the layout is two centered pegs. */
 export const PEG_X_SPREAD = 90;
@@ -79,7 +96,24 @@ export const PEG_GAP_MIN = 100;
 export const PEG_GAP_MAX = 130;
 /** How many pegs to keep above the one you hold. This layout stops at two total. */
 export const PEGS_AHEAD = 1;
-/** The second peg sits this far above the start peg. Design +y is down. */
-export const PEG_UPPER_GAP = 294;
+/** Peg art is 129×123, drawn at this width. Same size as the on-screen rivet. */
+export const PEG_DRAW_W = 52;
+export const PEG_DRAW_H = PEG_DRAW_W * (123 / 129);
+/**
+ * Foot-sprite center below the body center when the legs hang straight.
+ * Face art is 242×223. The ankles sit on face pixel row 208.
+ */
+const FACE_W = 242;
+const FACE_H = 223;
+const HEAD_W = BODY_RADIUS * 2.2;
+const HEAD_H = HEAD_W * (FACE_H / FACE_W);
+export const LEG_DROP = (208 / FACE_H - 0.5) * HEAD_H;
+/** Start rivet sits on the hanging monkey's feet. */
+export const PEG_LOWER_Y = feelDefaults.restDrop + LEG_DROP;
+/**
+ * Upper rivet keeps the old spacing above a peg at y = 0, then moves
+ * up by three rivet heights. +y is down, so the upper peg has the smaller y.
+ */
+export const PEG_UPPER_GAP = PEG_LOWER_Y + 294 + PEG_DRAW_H * 3;
 /** How often a new peg is red. No dissolve yet. */
 export const RED_PEG_CHANCE = 0.18;

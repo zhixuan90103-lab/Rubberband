@@ -45,7 +45,7 @@ portrait-webgpu-base/
 
 | 项 | 值 |
 |----|-----|
-| `appId` | 在 `capacitor.config.ts` 自定，避免和真机已装 App 冲突 |
+| `appId` | `com.wangzhixuan.rubberband`。不要改回共用的 hapticstest 包名 |
 | `webDir` | `dist` |
 | `ios.contentInset` | `never` |
 | `ios.scrollEnabled` | `false` |
@@ -162,3 +162,4 @@ npm run cap:sync
 | 2026-10-12 | 文档与现行规则对齐：软带悬挂、360° 拉距、身体抓钉、Rapier 只负责收回、飞行和墙 |
 | 2026-10-12 | 两颗钉、抓钉过冲、镜头 70% 白线写入手感、物理和范围文档 |
 | 2026-10-13 | 手臂、过冲和转角改成一条规则。皮筋率数在 `sling.ts`。飞行不转。抓住后过冲和回落同一次旋转，停在头顶朝上 |
+| 2026-10-13 | 现行规则收到 `docs/PHYSICS-PLAN.md`，数字真源是 `src/game/tune.ts`。出手速率是劲度乘伸长。默认劲度 26、重力 4000、拉长上限 145、死区 25。包名 `com.wangzhixuan.rubberband` |

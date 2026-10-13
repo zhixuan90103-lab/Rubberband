@@ -3,7 +3,7 @@
  * Swap the body of `nextPeg` to change the layout rule.
  */
 
-import { PEG_UPPER_GAP, SHAFT_CENTER } from './tune';
+import { PEG_LOWER_Y, PEG_UPPER_GAP, SHAFT_CENTER } from './tune';
 
 export type PegKind = 'blue' | 'red';
 
@@ -33,5 +33,5 @@ export function nextPeg(prev: Peg, _rng: Rng, nextId: number): Peg {
 }
 
 export function firstPeg(id: number): Peg {
-  return { id, x: SHAFT_CENTER, y: 0, kind: 'blue' };
+  return { id, x: SHAFT_CENTER, y: PEG_LOWER_Y, kind: 'blue' };
 }

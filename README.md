@@ -10,7 +10,8 @@
 | [docs/MERGE.md](./docs/MERGE.md) | 双工程优点对照与合并说明 |
 | [docs/AUDIO.md](./docs/AUDIO.md) | 音效方案（预解码 + 每帧一批 + 原生池） |
 | [docs/HAPTICS.md](./docs/HAPTICS.md) | 震动如何一次接对（插件注册 + 玩法层） |
-| [docs/SLING-KONG-FEEL.md](./docs/SLING-KONG-FEEL.md) | 手感来源，以及已经写进 `tune.ts` 的常数 |
+| [docs/PHYSICS-PLAN.md](./docs/PHYSICS-PLAN.md) | 现行物理规则和默认数。代码真源是 `src/game/tune.ts` |
+| [docs/SLING-KONG-FEEL.md](./docs/SLING-KONG-FEEL.md) | 原作手感来源。数字不要从这里抄 |
 | [docs/MVP-PLAN.md](./docs/MVP-PLAN.md) | 拉射已落地的范围，和还没做的部分 |
 
 ## 30 秒上手

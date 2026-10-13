@@ -33,11 +33,11 @@ import {
   tryBeginDrag,
   type SlingWorld,
 } from './game/sling';
+import { mountTunePanel } from './game/tunePanel';
 import {
   BODY_RADIUS,
   DRAG_BLOCK_Y,
-  MAX_PULL,
-  MIN_PULL,
+  feel,
 } from './game/tune';
 import bgUrl from './assets/bg-jungle.png';
 import eyesUrl from './assets/art/04-two-slots.png';
@@ -677,6 +677,8 @@ function syncView(
 }
 
 async function boot(): Promise<void> {
+  const ui = document.getElementById('ui-root');
+  if (ui) mountTunePanel(ui);
   applyNativeClass();
   const native = Capacitor.isNativePlatform();
   const platform = Capacitor.getPlatform();
@@ -781,9 +783,9 @@ async function boot(): Promise<void> {
       `${platform}${native ? ' · native' : ''}\n` +
         `${world.phase} · height ${Math.round(world.height)} · pull ${pull}` +
         (world.phase === 'drag'
-          ? pull < MIN_PULL
-            ? ` · under ${MIN_PULL}`
-            : ` · shot ${Math.min(pull, MAX_PULL)}`
+          ? pull < feel.minPull
+            ? ` · under ${feel.minPull}`
+            : ` · shot ${Math.min(pull, feel.maxPull)}`
           : '') +
         (world.phase === 'fall' ? '\ntap to restart' : ''),
     );

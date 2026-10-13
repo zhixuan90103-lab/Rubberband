@@ -1,22 +1,21 @@
 /**
- * Rapier 2D owns the step, gravity, the shaft walls, and the hang joint.
- * Design pixels, +y down. Game rules stay in sling.ts.
+ * Rapier 2D owns the step, gravity, and the shaft walls.
+ * The arm is a force added before each step. Design pixels, +y down.
  */
 
 import RAPIER from '@dimforge/rapier2d-compat';
 import {
+  armSlack,
   BODY_RADIUS,
-  GRAVITY,
-  HANG_DROP,
+  feel,
   SHAFT_LEFT,
   SHAFT_RIGHT,
-  WALL_RESTITUTION,
 } from './tune';
 
 export type Sim = {
   world: RAPIER.World;
   body: RAPIER.RigidBody;
-  joint: RAPIER.ImpulseJoint | null;
+  colliders: RAPIER.Collider[];
 };
 
 let ready = false;
@@ -31,37 +30,39 @@ function requireReady(): void {
   if (!ready) throw new Error('call initPhysics() before creating a sling world');
 }
 
-function wall(world: RAPIER.World, x: number): void {
+function wall(world: RAPIER.World, x: number, colliders: RAPIER.Collider[]): void {
   const thickness = 40;
   const fixed = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(x, 0));
   const shape = RAPIER.ColliderDesc.cuboid(thickness / 2, 20_000)
-    .setRestitution(WALL_RESTITUTION)
+    .setRestitution(feel.wallRestitution)
     .setRestitutionCombineRule(RAPIER.CoefficientCombineRule.Max)
     .setFriction(0);
-  world.createCollider(shape, fixed);
+  colliders.push(world.createCollider(shape, fixed));
 }
 
 export function createSim(x: number, y: number): Sim {
   requireReady();
-  const world = new RAPIER.World({ x: 0, y: GRAVITY });
+  const world = new RAPIER.World({ x: 0, y: feel.gravity });
   world.timestep = 1 / 60;
   world.integrationParameters.lengthUnit = 20;
   world.integrationParameters.maxCcdSubsteps = 4;
-  wall(world, SHAFT_LEFT - 20);
-  wall(world, SHAFT_RIGHT + 20);
+  const colliders: RAPIER.Collider[] = [];
+  wall(world, SHAFT_LEFT - 20, colliders);
+  wall(world, SHAFT_RIGHT + 20, colliders);
 
   const body = world.createRigidBody(
     RAPIER.RigidBodyDesc.dynamic().setTranslation(x, y).setCcdEnabled(true).setLinearDamping(0),
   );
   world.createCollider(
     RAPIER.ColliderDesc.ball(BODY_RADIUS)
-      .setRestitution(WALL_RESTITUTION)
+      .setRestitution(feel.wallRestitution)
       .setRestitutionCombineRule(RAPIER.CoefficientCombineRule.Max)
       .setFriction(0)
       .setDensity(1),
     body,
   );
-  return { world, body, joint: null };
+  colliders.push(body.collider(0));
+  return { world, body, colliders };
 }
 
 export function simFree(sim: Sim): void {
@@ -79,29 +80,37 @@ export function simRead(sim: Sim): { x: number; y: number; vx: number; vy: numbe
   return { x: t.x, y: t.y, vx: v.x, vy: v.y };
 }
 
-/** Acceleration toward the peg, scaled by mass so the rate matches LAUNCH_SCALE. */
-export function simSpring(sim: Sim, pegX: number, pegY: number, rate: number): void {
+/**
+ * One arm. Past ARM_SLACK it pulls toward the peg and damps radial speed.
+ * Shorter than that, the pull is zero. Tangential damping always acts, so a
+ * swing can stop. Gravity is the world gravity, not part of this force.
+ */
+export function simApplyArm(sim: Sim, pegX: number, pegY: number, dt: number): void {
   const t = sim.body.translation();
+  const v = sim.body.linvel();
   const dx = t.x - pegX;
   const dy = t.y - pegY;
   const reach = Math.hypot(dx, dy);
-  const extension = reach - HANG_DROP;
-  if (extension <= 0 || reach < 1e-4) return;
-  const accel = rate * rate * extension;
+  if (reach < 1e-4) return;
+  const nx = dx / reach;
+  const ny = dy / reach;
+  const radial = v.x * nx + v.y * ny;
+  const slack = armSlack();
+  const keep = Math.exp(-feel.tangentDamp * dt);
+  const vx = (v.x - radial * nx) * keep + radial * nx;
+  const vy = (v.y - radial * ny) * keep + radial * ny;
+  sim.body.setLinvel({ x: vx, y: vy }, true);
+  if (reach <= slack) return;
+  const accel = feel.armOmega * feel.armOmega * (reach - slack) + feel.radialDamp * radial;
   const mass = sim.body.mass();
-  const inv = 1 / reach;
-  sim.body.addForce({ x: -dx * inv * accel * mass, y: -dy * inv * accel * mass }, true);
-}
-
-export function simClearJoint(sim: Sim): void {
-  if (!sim.joint) return;
-  sim.world.removeImpulseJoint(sim.joint, true);
-  sim.joint = null;
+  sim.body.addForce({ x: -nx * accel * mass, y: -ny * accel * mass }, true);
 }
 
 export function simStep(sim: Sim, dt: number): void {
   // A pixel-scale world only notices a fast wall hit on the step after the
   // overlap. Two substeps resolve the bounce inside one game frame.
+  sim.world.gravity = { x: 0, y: feel.gravity };
+  for (const collider of sim.colliders) collider.setRestitution(feel.wallRestitution);
   const sub = dt / 2;
   sim.world.timestep = sub;
   sim.world.step();
