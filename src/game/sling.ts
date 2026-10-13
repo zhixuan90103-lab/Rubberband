@@ -7,7 +7,8 @@
  *    slack at HANG_DROP and the body flies.
  * 2. Catch. One one-sided band on whatever peg the body touches. It is
  *    slack inside the hang length, pulls only when stretched, and stops
- *    at one extra hang length. The body spins about its own center.
+ *    at one extra hang length. The body spins about its own center
+ *    and settles crown-up along the arm. A grab does not owe a full turn.
  * 3. Hang. The same arm, locked at the hang length, returns once and
  *    stops under the peg. The crown squares onto the arm.
  */
@@ -66,11 +67,21 @@ export type Body = {
 /** Present while the catch band has not settled back to the hang length. */
 export type Catch = {
   held: true;
-  /** Spin at the grab. This catch turns at most one full turn from here. */
+  /** Unit direction of the velocity at the grab. Overshoot is motion along this. */
+  dirX: number;
+  dirY: number;
+  /** Speed along that direction at the grab. */
+  surge0: number;
   spinFrom: number;
-  spinSign: number;
-  /** Catch tumble the body is easing toward, in rad/s. It decays with the spin. */
-  spinGoal: number;
+  sign: number;
+  /** Signed angle from the grab pose to the next crown-up angle. */
+  turn: number;
+  /** `out` is the carry past the peg. `back` is the fall back to the hang. */
+  stage: 'out' | 'back';
+  /** 0 at the grab, 1 when the fall-back has reached the hang. Never decreases. */
+  progress: number;
+  /** Distance from the hang point when the carry turns around. */
+  span: number;
 };
 
 export type SlingWorld = {
@@ -349,12 +360,19 @@ function grab(world: SlingWorld, peg: Peg): void {
   }
   world.body.vx *= CATCH_KEEP;
   world.body.vy *= CATCH_KEEP;
-  const tumble = catchSpin(dx, dy, world.body.vx, world.body.vy);
+  const speed = Math.hypot(world.body.vx, world.body.vy) || 1;
+  world.body.spinVel = 0;
   world.catch = {
     held: true,
+    dirX: world.body.vx / speed,
+    dirY: world.body.vy / speed,
+    surge0: speed,
     spinFrom: world.body.spin,
-    spinSign: tumble.sign,
-    spinGoal: tumble.goal,
+    sign: Math.sign(catchSpin(dx, dy, world.body.vx, world.body.vy)) || 1,
+    turn: turnToUpright(world.body.spin, Math.sign(catchSpin(dx, dy, world.body.vx, world.body.vy)) || 1),
+    stage: 'out',
+    progress: 0,
+    span: 1,
   };
   world.height = Math.max(world.height, -peg.y);
   fillAhead(world);
@@ -429,16 +447,18 @@ function weightGravity(vy: number): number {
 }
 
 /**
- * One tumble for every arrival. The sign is the tangential speed around
- * the peg. A head-on hit has almost none, so it still turns at the minimum
- * rate instead of taking a separate vertical path.
+ * Angular kick from the tangential speed, rad/s. A real sideways hit
+ * gets enough speed to finish the turn. A head-on hit stays small.
  */
-function catchSpin(dx: number, dy: number, vx: number, vy: number): { sign: number; goal: number } {
+function catchSpin(dx: number, dy: number, vx: number, vy: number): number {
   const reach = Math.hypot(dx, dy) || 1;
   const tangent = (dx * vy - dy * vx) / reach;
   const speed = Math.hypot(vx, vy);
-  const sign = Math.abs(tangent) > 40 ? Math.sign(tangent) : 1;
-  return { sign, goal: sign * Math.min(16, 7 + speed * 0.01) };
+  // Head-on, including a straight upward catch, has almost no tangent.
+  // Still give a visible turn. The coast rate below keeps it near one revolution.
+  const sign = Math.sign(tangent) || -Math.sign(vy) || 1;
+  const kick = Math.max(Math.abs(tangent) * 0.006, speed > 180 ? 6 : 0);
+  return sign * Math.min(8, kick);
 }
 
 type Arm = {
@@ -517,29 +537,35 @@ function stepCatch(world: SlingWorld, peg: Peg, dt: number): void {
     tangentDamp: CATCH_SWING_DAMP,
   });
   const reach = arm.reach;
-  // Chase the catch rate, then ease onto the one-turn cap so the spin does not stop dead.
-  const turned = (world.body.spin - world.catch.spinFrom) * world.catch.spinSign;
-  const room = Math.PI * 2 - turned;
-  const sign = world.catch.spinSign;
-  if (room > 0.55 && world.body.spinVel * sign > -1) {
-    const follow = 1 - Math.exp(-12 * dt);
-    world.body.spinVel += (world.catch.spinGoal - world.body.spinVel) * follow;
-    world.catch.spinGoal *= Math.exp(-1.15 * dt);
-    const step = world.body.spinVel * dt;
-    if (sign * step > room - 0.55) world.body.spin += sign * (room - 0.55);
-    else world.body.spin += step;
-  } else {
-    const omega = 14;
-    world.body.spinVel += (sign * omega * omega * Math.max(0, room) - 2 * omega * world.body.spinVel) * dt;
-    world.body.spin += world.body.spinVel * dt;
-    if ((world.body.spin - world.catch.spinFrom) * sign >= Math.PI * 2) {
-      world.body.spin = world.catch.spinFrom + sign * Math.PI * 2;
-      world.body.spinVel *= Math.exp(-10 * dt);
+  // One turn covers both the carry past the peg and the fall back.
+  // It does not finish at the top, and it does not rewind on the rebound.
+  const surge = world.body.vx * world.catch.dirX + world.body.vy * world.catch.dirY;
+  const hangX = peg.x;
+  const hangY = peg.y + REST_DROP;
+  if (world.catch.stage === 'out') {
+    const climbed = Math.min(1, Math.max(0, 1 - surge / world.catch.surge0));
+    world.catch.progress = Math.max(world.catch.progress, climbed * 0.5);
+    if (surge <= 40) {
+      world.catch.stage = 'back';
+      world.catch.span = Math.max(8, Math.hypot(world.body.x - hangX, world.body.y - hangY));
     }
+  } else {
+    const left = Math.hypot(world.body.x - hangX, world.body.y - hangY);
+    const returned = Math.min(1, Math.max(0, 1 - left / world.catch.span));
+    world.catch.progress = Math.max(world.catch.progress, 0.5 + returned * 0.5);
   }
+  // Reach crown-up before the hang finishes, and do not travel past it.
+  const aimed = Math.min(1, world.catch.progress * 1.15);
+  followSpin(world.body, world.catch.spinFrom + world.catch.turn * aimed, dt, 10);
   const speed = Math.hypot(world.body.vx, world.body.vy);
   // Same settle for every side of the peg. The rope then brings the body underneath.
-  const hung = Math.abs(reach - REST_DROP) < 2 && speed < 24;
+  // Settle only after the fall-back, under the peg. The top of the carry
+  // is also slow and about one arm away, and must not end the catch.
+  const hung =
+    world.catch.stage === 'back' &&
+    world.body.y > peg.y &&
+    Math.abs(reach - REST_DROP) < 4 &&
+    speed < 40;
   if (hung) world.catch = null;
   simWrite(world.sim, world.body.x, world.body.y, world.body.vx, world.body.vy);
 }
@@ -571,9 +597,14 @@ function stepHang(world: SlingWorld, dt: number): void {
     world.body.vx = 0;
     world.body.vy = 0;
   }
-  // Moving: crown stays on the arm. At rest: square up promptly.
-  const aim = Math.atan2(peg.x - world.body.x, -(peg.y - world.body.y));
-  easeSpin(world.body, aim, dt, resting ? 20 : 12);
+  // Crown up. A downward grab starts crown-down, so the catch turn aims here
+  // and this spring finishes whatever is left without a snap.
+  const before = world.body.spin;
+  easeSpin(world.body, 0, dt, 8);
+  if (before * world.body.spin < 0) {
+    world.body.spin = 0;
+    world.body.spinVel = 0;
+  }
   simWrite(world.sim, world.body.x, world.body.y, world.body.vx, world.body.vy);
 }
 
@@ -581,9 +612,6 @@ function stepFly(world: SlingWorld, dt: number): void {
   world.leftLock = Math.max(0, world.leftLock - dt);
   const vxBefore = world.body.vx;
   world.body.vy += (weightGravity(world.body.vy) - GRAVITY) * dt;
-  world.body.spin += world.body.vx * 0.004 * dt;
-  world.body.spin += world.body.spinVel * dt;
-  world.body.spinVel *= Math.exp(-2.8 * dt);
   simClearJoint(world.sim);
   simWrite(world.sim, world.body.x, world.body.y, world.body.vx, world.body.vy);
   simStep(world.sim, dt);
@@ -609,6 +637,31 @@ function stepFly(world: SlingWorld, dt: number): void {
     }
   }
   if (best) grab(world, best);
+}
+
+/**
+ * Angle that lands on crown-up. A pose that is already close gets one turn,
+ * so the grab is visible, and the turn stops on crown-up.
+ */
+function turnToUpright(spin: number, sign: number): number {
+  const tau = Math.PI * 2;
+  let delta = -spin;
+  delta -= Math.round(delta / tau) * tau;
+  if (Math.abs(delta) < 0.9) delta += (sign >= 0 ? 1 : -1) * tau;
+  return delta;
+}
+
+/** Follow a moving angle. Stop on the goal instead of swinging past it. */
+function followSpin(body: Body, goal: number, dt: number, omega: number): void {
+  const delta = goal - body.spin;
+  body.spinVel += (omega * omega * delta - 2 * omega * body.spinVel) * dt;
+  const step = body.spinVel * dt;
+  if (delta === 0 || step * delta >= delta * delta) {
+    body.spin = goal;
+    body.spinVel = 0;
+    return;
+  }
+  body.spin += step;
 }
 
 /** Shortest-arc spring. Keeps spinVel so a new target joins the turn already in motion. */

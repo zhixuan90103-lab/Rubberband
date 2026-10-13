@@ -21,13 +21,13 @@ export const LAUNCH_SCALE = 11.5;
  */
 export const CATCH_KEEP = 1;
 /**
- * Soft-band rate while hanging, sqrt(k/m), in 1/s.
- * Tension only past HANG_DROP. A straight hang sags until weight balances.
+ * Unused by the current arm. Catch and hang rates live next to stepArm
+ * in sling.ts (BAND_RATE, CATCH_SWING_DAMP, ROPE_DAMP).
  */
 export const ARM_RATE = 7;
-/** How fast the radial bounce dies, 1/s. A few visible rebounds, then rest. */
+/** Unused by the current arm. See sling.ts BAND_DAMP. */
 export const ARM_DAMP = 2.2;
-/** Tangential drag, 1/s. The body swings past the bottom before it rests. */
+/** Unused by the current arm. See sling.ts CATCH_SWING_DAMP and ROPE_DAMP. */
 export const SWING_DAMP = 1.15;
 /** How far a slack band bows sideways, in px. A taut band bows less. */
 export const ARM_SAG = 26;

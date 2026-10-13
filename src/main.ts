@@ -256,11 +256,16 @@ function eyeCue(n: number): {
   return { x: look[0], y: look[1], out, hold, back, rest, blinks, blinkAt, length };
 }
 
+function smoothStep(t: number): number {
+  const x = Math.min(1, Math.max(0, t));
+  return x * x * (3 - 2 * x);
+}
+
 /** Fast slide, then a small overshoot that settles onto the target. */
 function eyeSnap(t: number): number {
   const u = Math.min(1, Math.max(0, t));
   const slide = 1 - (1 - Math.min(1, u / 0.62)) ** 3;
-  const settle = u < 0.62 ? 0 : hangSmooth((u - 0.62) / 0.38);
+  const settle = u < 0.62 ? 0 : smoothStep((u - 0.62) / 0.38);
   return slide * 1.12 + (1 - 1.12) * settle * (u < 0.62 ? 0 : 1);
 }
 
@@ -274,8 +279,8 @@ function ensureEyes(time: number): void {
 function blinkAmount(t: number, duration: number): number {
   if (t < 0 || t > duration) return 0;
   const u = t / duration;
-  if (u < 0.38) return hangSmooth(u / 0.38);
-  return 1 - hangSmooth((u - 0.38) / 0.62);
+  if (u < 0.38) return smoothStep(u / 0.38);
+  return 1 - smoothStep((u - 0.38) / 0.62);
 }
 
 function eyePose(time: number): { x: number; y: number; blink: number } {
@@ -316,128 +321,13 @@ function stepEyes(eyes: THREE.Mesh, dt: number): void {
   eyes.scale.y = 1 - pose.blink * 0.92;
 }
 
-type HangGesture = {
-  charge: number;
-  /** Damped swings after the release. Ends on a zero crossing. */
-  swing: number;
-  /** How far the body leans while gathering. The swing is a multiple of this. */
-  wind: number;
-  peak: number;
-  sign: number;
-  /** In-place breath. No wind-up and no rotation. */
-  breathe: boolean;
-  breathPeriod: number;
-  breathAmp: number;
-  length: number;
-};
-
-type HangMotion = {
-  /** Where the body sits around the peg. Arms follow this line. */
-  rock: number;
-  /** Torso only, used while gathering. */
-  lean: number;
-  /** Extra body twist during the swing. It does not move the arms. */
-  whip: number;
-  /** Vertical breath. +y is down. */
-  bob: number;
-};
-
-const hangStarts = [0];
-
-function hangGesture(n: number): HangGesture {
-  const wind = 0.14 + hangRand(n * 5) * 0.08;
-  const peak = wind * (1.45 + hangRand(n * 5 + 1) * 0.7);
-  const charge = 0.32 + hangRand(n * 5 + 2) * 0.18;
-  const swing = 1.8;
-  const sign = hangRand(n * 5 + 3) > 0.5 ? 1 : -1;
-  const breathe = hangRand(n * 5 + 4) > 0.5;
-  const breathPeriod = 1.15 + hangRand(n * 5 + 1) * 0.3;
-  const breathAmp = 1.6 + hangRand(n * 5 + 3) * 0.8;
-  if (breathe) {
-    const breaths = 2 + Math.floor(hangRand(n * 5 + 2) * 2);
-    return {
-      charge: 0,
-      swing: breaths * breathPeriod,
-      wind: 0,
-      peak: 0,
-      sign: 1,
-      breathe: true,
-      breathPeriod,
-      breathAmp,
-      length: breaths * breathPeriod,
-    };
-  }
-  return {
-    charge,
-    swing,
-    wind,
-    peak,
-    sign,
-    breathe: false,
-    breathPeriod: 0,
-    breathAmp: 0,
-    length: charge + swing,
-  };
-}
-
-function hangSmooth(t: number): number {
-  const x = Math.min(1, Math.max(0, t));
-  return x * x * (3 - 2 * x);
-}
-
-function ensureHang(time: number): void {
-  while (hangStarts[hangStarts.length - 1] < time + 1) {
-    const n = hangStarts.length - 1;
-    hangStarts.push(hangStarts[n] + hangGesture(n).length);
-  }
-}
-
-function scaleMotion(motion: HangMotion, weight: number): HangMotion {
-  return {
-    rock: motion.rock * weight,
-    lean: motion.lean * weight,
-    whip: motion.whip * weight,
-    bob: motion.bob * weight,
-  };
-}
-
-function hangMotion(time: number): HangMotion {
-  if (time <= 0) return { rock: 0, lean: 0, whip: 0, bob: 0 };
-  ensureHang(time);
-  let i = hangStarts.length - 2;
-  while (i > 0 && hangStarts[i] > time) i -= 1;
-  const g = hangGesture(i);
-  let t = time - hangStarts[i];
-  if (g.breathe) {
-    if (t >= g.swing) return { rock: 0, lean: 0, whip: 0, bob: 0 };
-    const phase = (t / g.breathPeriod) * Math.PI * 2;
-    const side = Math.sin(phase) * Math.sin((Math.PI * t) / g.swing);
-    return {
-      rock: side * 0.02,
-      lean: side * 0.07,
-      whip: 0,
-      bob: -g.breathAmp * 0.5 * (1 - Math.cos(phase)),
-    };
-  }
-  if (t < g.charge) {
-    return { rock: 0, lean: -g.sign * g.wind * hangSmooth(t / g.charge), whip: 0, bob: 0 };
-  }
-  t -= g.charge;
-  if (t >= g.swing) return { rock: 0, lean: 0, whip: 0, bob: 0 };
-  const release = 0.2;
-  const lean = t < release ? -g.sign * g.wind * (1 - hangSmooth(t / release)) : 0;
-  const omega = (Math.PI * 2) / 0.72;
-  const settle = 0.3;
-  const env = t < g.swing - settle ? 1 : 1 - hangSmooth((t - (g.swing - settle)) / settle);
-  const rock = g.sign * g.peak * Math.exp(-2.35 * t) * Math.sin(omega * t) * env;
-  // Same swing as the arms, but the torso goes further and comes back with it.
-  const whip = rock * 1.65;
-  return { rock, lean, whip, bob: 0 };
-}
-
-function hangRand(n: number): number {
-  const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
-  return x - Math.floor(x);
+/** Settled-hang breath, pixels. +y is down, so this only lifts the body. */
+function hangBreath(time: number): number {
+  if (time <= 0) return 0;
+  const period = 1.25;
+  const amp = 2;
+  const phase = (time / period) * Math.PI * 2;
+  return -amp * 0.5 * (1 - Math.cos(phase));
 }
 
 const FOOT_HZ = 2.4;
@@ -712,29 +602,25 @@ function syncView(
   idleBlend += ((calm ? 1 : 0) - idleBlend) * (1 - Math.exp(-dt / 0.16));
   if (calm || idleBlend > 0.03) idleTime += dt;
   else idleTime = 0;
-  const motion = scaleMotion(hangMotion(idleTime), idleBlend);
+  // Breath only. A second swing or a torso lean fights the rope and the squared angle.
+  const bob = hangBreath(idleTime) * idleBlend;
   const poseX = world.body.x;
-  let poseY = world.body.y + motion.bob;
+  const poseY = world.body.y + bob;
   const handX = poseX;
   const handY = poseY;
   const armFacing = attached ? aim : world.body.spin;
-  // Lean is the torso gathering. It is not added on top of an arm orbit,
-  // so the crown stays on the arm once the rope is straight.
-  const poseFacing = world.body.spin + motion.lean;
+  const poseFacing = world.body.spin;
   actor.position.set(poseX, poseY, 0.4);
   actor.rotation.z = poseFacing;
-  // Swing stretches the body along the rope. It shortens again as the swing returns.
-  const stretch = Math.min(0.07, Math.abs(motion.lean) * 0.28 + Math.abs(motion.bob) * 0.008);
+  const stretch = Math.min(0.04, Math.abs(bob) * 0.008);
   actor.scale.set((1 + squash * 0.35) * (1 - stretch * 0.65), (1 - squash * 0.4) * (1 + stretch), 1);
   const step = Math.min(Math.max(dt, 0), 1 / 30);
   const cos = Math.cos(poseFacing);
   const sin = Math.sin(poseFacing);
-  const footMotion = scaleMotion(hangMotion(Math.max(0, idleTime - 0.12)), idleBlend);
-  const footRest = -footMotion.lean * 1.25;
   for (const foot of feet) {
     const ox = (cos * foot.lx - sin * foot.ly) * actor.scale.x;
     const oy = (sin * foot.lx + cos * foot.ly) * actor.scale.y;
-    stepFoot(foot, poseX + ox, poseY + oy, step, footRest);
+    stepFoot(foot, poseX + ox, poseY + oy, step, 0);
   }
   const { headW, headH } = monkeySize();
   actorShadow.position.set(poseX + headW * 0.12, poseY + headH * 0.17, 0);

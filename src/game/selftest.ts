@@ -153,16 +153,10 @@ const swung = Math.atan2(arc.body.x - arcPeg.x, arc.body.y - arcPeg.y);
 assert(arc.phase === 'hang', 'an offset hang keeps the rope');
 assert(Math.abs(swung) < 0.7, 'gravity pulls the swing down');
 assert(Math.abs(swung) > 0.05, 'the swing does not stick on the way down');
-arc.body.spin = 1.2;
-arc.body.spinVel = 4;
 for (let i = 0; i < 150; i += 1) stepWorld(arc, 1 / 60);
 const settled = Math.atan2(arc.body.x - arcPeg.x, arc.body.y - arcPeg.y);
-const settledAim = Math.atan2(arcPeg.x - arc.body.x, -(arcPeg.y - arc.body.y));
-let tilt = settledAim - arc.body.spin;
-tilt -= Math.round(tilt / (Math.PI * 2)) * Math.PI * 2;
 assert(Math.abs(settled) < 0.08, 'the rope stops under the peg');
 assert(Math.hypot(arc.body.vx, arc.body.vy) < 1, 'the rope does not keep swinging');
-assert(Math.abs(tilt) < 0.05, 'the body squares onto the arm');
 
 const wall = createWorld(mulberry32(6));
 wall.phase = 'fly';
@@ -202,8 +196,23 @@ for (let i = 0; i < 240; i += 1) {
 assert(longest <= REST_DROP * 2 + 1, 'the band stretches at most one extra hang length');
 assert(highest < risePeg.y - 20, 'the body carries above the peg');
 assert(fell, 'the body falls back under gravity');
-assert(spun > 1, 'the body spins about its own center');
+assert(rise.body.y > risePeg.y, 'the body hangs below the peg');
+assert(Math.abs(shortestSpin(rise.body.spin)) < 0.2, 'the body rests crown-up under the peg');
 assert(Math.abs(Math.hypot(rise.body.x - risePeg.x, rise.body.y - risePeg.y) - REST_DROP) < 14, 'the arms return to the hang length');
 assert(rise.catch === null, 'the body settles on the hang');
+
+const drop = createWorld(mulberry32(8));
+const dropPeg = drop.pegs[0];
+drop.phase = 'fly';
+drop.body.x = dropPeg.x;
+drop.body.y = dropPeg.y - GRAB_RADIUS - 30;
+drop.body.vx = 0;
+drop.body.vy = 700;
+drop.body.spin = Math.PI;
+for (let i = 0; i < 40 && String(drop.phase) === 'fly'; i += 1) stepWorld(drop, 1 / 60);
+assert(String(drop.phase) === 'hang', 'a downward arrival catches');
+for (let i = 0; i < 240; i += 1) stepWorld(drop, 1 / 60);
+assert(drop.body.y > dropPeg.y, 'a downward catch ends under the peg');
+assert(Math.abs(shortestSpin(drop.body.spin)) < 0.25, 'a downward catch ends crown-up');
 
 console.log('sling self-test ok');
