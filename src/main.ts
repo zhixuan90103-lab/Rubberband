@@ -20,7 +20,7 @@ import {
 } from './adapt/devicePreview';
 import { applyNativeClass, applySafeAreaCssVars } from './adapt/safeArea';
 import { createRenderer } from './create-renderer';
-import { mulberry32 } from './game/pegs';
+import { mulberry32, pegSpent, pegUrgency, pegWarn } from './game/pegs';
 import { initPhysics } from './game/sim';
 import {
   advance,
@@ -50,6 +50,9 @@ import armsUrl from './assets/art/08-pair-limbs.png';
 import pegBackUrl from './assets/art/03-dark-disc.png';
 import pegBlueUrl from './assets/art/02-blue-ring.png';
 import pegRedUrl from './assets/art/01-pink-ring.png';
+import pegGreenUrl from './assets/art/10-green-rivet.png';
+import pegGrayUrl from './assets/art/11-gray-rivet.png';
+import pegFlashUrl from './assets/art/12-peg-flash.png';
 import wallUrl from './assets/art/09-wall-slice.png';
 
 const stage = document.getElementById('stage')!;
@@ -69,12 +72,28 @@ function makeOrtho(): THREE.OrthographicCamera {
 
 type PegView = {
   group: THREE.Group;
+  back: THREE.Mesh;
   blue: THREE.Mesh;
   red: THREE.Mesh;
+  green: THREE.Mesh;
+  gray: THREE.Mesh;
+  flash: THREE.Mesh;
+  blink: number;
 };
 
 /** Ring and back plate share a 129×123 canvas. One size keeps them aligned. */
 const PEG_W = 52;
+/** Additive core flash, slow at 2s left and fast as the peg is about to turn gray. */
+const PEG_FLASH_HZ = { slow: 2, fast: 12 };
+/** Sampled centers of the blue and red rivet art. */
+const PEG_FLASH_COLOR = {
+  blue: [39 / 255, 149 / 255, 233 / 255] as const,
+  red: [233 / 255, 39 / 255, 91 / 255] as const,
+};
+/** Share of white in the flash. The rest stays the peg color, so the glint is light, not more saturated. */
+const PEG_FLASH_WHITE = 0.85;
+/** Extra energy on that light color. Above 1 so the bright frame reaches white before the 8-bit target clips. */
+const PEG_FLASH_PEAK = 1.5;
 const PEG_H = PEG_W * (123 / 129);
 
 /** Face art is 242×223. Pupils and feet are placed in that pixel frame. */
@@ -209,6 +228,7 @@ function makeFoot(lx: number, ly: number, width: number, height: number): Foot {
  * the other way. The angle is clamped so it cannot flip over the top.
  */
 let idleTime = 0;
+let maxShake = 0;
 /** 0 while swinging or airborne, 1 in a settled hang. Fades so the idle does not pop on. */
 let idleBlend = 0;
 let eyeClock = 0;
@@ -796,13 +816,45 @@ function makePegView(): PegView {
   back.position.z = -0.4;
   const blue = artSprite(pegBlueUrl, PEG_W, PEG_H);
   const red = artSprite(pegRedUrl, PEG_W, PEG_H);
+  const green = artSprite(pegGreenUrl, PEG_W, PEG_H);
+  const gray = artSprite(pegGrayUrl, PEG_W, PEG_H);
   blue.renderOrder = 3;
   red.renderOrder = 3;
+  green.renderOrder = 3;
+  gray.renderOrder = 3;
   blue.position.z = 0.8;
   red.position.z = 0.8;
+  green.position.z = 0.8;
+  gray.position.z = 0.8;
   red.visible = false;
-  group.add(shadow, back, blue, red);
-  return { group, blue, red };
+  green.visible = false;
+  gray.visible = false;
+  // Same 129×123 frame as the rivet. WebGPU adds when premultipliedAlpha is on.
+  const flashMap = new THREE.TextureLoader().load(pegFlashUrl);
+  flashMap.colorSpace = THREE.SRGBColorSpace;
+  flashMap.flipY = false;
+  flashMap.premultiplyAlpha = true;
+  flashMap.generateMipmaps = false;
+  flashMap.magFilter = THREE.LinearFilter;
+  flashMap.minFilter = THREE.LinearFilter;
+  const flashMat = new THREE.MeshBasicMaterial({
+    map: flashMap,
+    transparent: true,
+    premultipliedAlpha: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    depthTest: false,
+    toneMapped: false,
+    side: THREE.DoubleSide,
+    opacity: 1,
+  });
+  const flash = new THREE.Mesh(new THREE.PlaneGeometry(PEG_W, PEG_H), flashMat);
+  flash.renderOrder = 8;
+  flash.position.z = 1.2;
+  flash.scale.setScalar(1);
+  flash.visible = false;
+  group.add(shadow, back, blue, red, green, gray, flash);
+  return { group, back, blue, red, green, gray, flash, blink: 0 };
 }
 
 function syncView(
@@ -865,6 +917,18 @@ function syncView(
     poseX = heldNow.x + rc * dx - rs * dy;
     poseY = heldNow.y + rs * dx + rc * dy + bob;
   }
+  // Full pull only. The shake stays on the pull line and does not move the body.
+  if (world.phase === 'drag' && world.fullPull && heldNow) {
+    const dx = world.body.x - heldNow.x;
+    const dy = world.body.y - heldNow.y;
+    const reach = Math.hypot(dx, dy);
+    if (reach > 1) {
+      maxShake += dt;
+      const alongPull = Math.sin(maxShake * 62) * 1.5;
+      poseX += (dx / reach) * alongPull;
+      poseY += (dy / reach) * alongPull;
+    }
+  } else maxShake = 0;
   const handX = poseX;
   const handY = poseY;
   const armFacing = (attached ? aim : world.body.spin) + rock;
@@ -943,9 +1007,37 @@ function syncView(
       pegViews.set(peg.id, view);
     }
     view.group.position.set(peg.x, peg.y, 0);
-    const red = peg.kind === 'red';
-    view.red.visible = red;
-    view.blue.visible = !red;
+    const spent = pegSpent(peg);
+    const green = peg.kind === 'green';
+    view.back.visible = true;
+    view.gray.visible = spent;
+    view.green.visible = !spent && green;
+    view.red.visible = !spent && peg.kind === 'red';
+    view.blue.visible = !spent && peg.kind === 'blue';
+    const hanging =
+      peg.id === world.heldId &&
+      (world.phase === 'hang' || world.phase === 'drag' || world.phase === 'return');
+    const flashMat = view.flash.material as THREE.MeshBasicMaterial;
+    if (hanging && pegWarn(peg)) {
+      const urgency = pegUrgency(peg);
+      const hz = PEG_FLASH_HZ.slow + urgency * (PEG_FLASH_HZ.fast - PEG_FLASH_HZ.slow);
+      view.blink += dt * hz;
+      const wave = 0.5 + 0.5 * Math.sin(view.blink * Math.PI * 2);
+      const tint = peg.kind === 'red' ? PEG_FLASH_COLOR.red : PEG_FLASH_COLOR.blue;
+      const keep = 1 - PEG_FLASH_WHITE;
+      flashMat.color.setRGB(
+        PEG_FLASH_WHITE + tint[0] * keep,
+        PEG_FLASH_WHITE + tint[1] * keep,
+        PEG_FLASH_WHITE + tint[2] * keep,
+        THREE.SRGBColorSpace,
+      );
+      flashMat.color.multiplyScalar(PEG_FLASH_PEAK);
+      flashMat.opacity = wave;
+      view.flash.visible = true;
+    } else {
+      view.flash.visible = false;
+      flashMat.opacity = 0;
+    }
   }
 }
 
@@ -992,7 +1084,7 @@ async function boot(): Promise<void> {
     if (rect.width <= 0 || rect.height <= 0) return null;
     const x = ((event.clientX - rect.left) / rect.width) * DESIGN_WIDTH;
     const y = ((event.clientY - rect.top) / rect.height) * DESIGN_HEIGHT;
-    if (!isInDesignBounds(x, y)) return null;
+    if (!isInDesignBounds(x, y) && world.phase !== 'drag') return null;
     return { x, y };
   };
 

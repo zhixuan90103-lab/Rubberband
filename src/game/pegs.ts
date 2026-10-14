@@ -3,16 +3,71 @@
  * Swap the body of `nextPeg` to change the layout rule.
  */
 
-import { PEG_LOWER_Y, PEG_UPPER_GAP, PEG_X_SPREAD, SHAFT_CENTER } from './tune';
+import { BLUE_PEG_LIFE, PEG_INVALID, PEG_LOWER_Y, PEG_UPPER_GAP, PEG_WARN, PEG_X_SPREAD, RED_PEG_CHANCE, RED_PEG_LIFE, SHAFT_CENTER } from './tune';
 
-export type PegKind = 'blue' | 'red';
+export type PegKind = 'blue' | 'red' | 'green';
 
 export type Peg = {
   id: number;
   x: number;
   y: number;
   kind: PegKind;
+  /** Seconds the monkey has hung on this peg since it last recovered. */
+  age: number;
+  /** Seconds it has stayed gray. Zero while it is still usable. */
+  cool: number;
 };
+
+export function pegLife(kind: PegKind): number {
+  if (kind === 'green') return Infinity;
+  if (kind === 'red') return RED_PEG_LIFE;
+  return BLUE_PEG_LIFE;
+}
+
+export function makePeg(id: number, x: number, y: number, kind: PegKind): Peg {
+  return { id, x, y, kind, age: 0, cool: 0 };
+}
+
+/** Seconds of hang time left. Green never runs out. */
+export function pegRemain(peg: Peg): number {
+  return pegLife(peg.kind) - peg.age;
+}
+
+/** Gray only during the invalid gap after this peg's own hang time runs out. */
+export function pegSpent(peg: Peg): boolean {
+  const life = pegLife(peg.kind);
+  if (!Number.isFinite(life)) return false;
+  return peg.age >= life && peg.cool < PEG_INVALID;
+}
+
+/**
+ * One peg's clock. `counting` is true only for the peg the monkey is on.
+ * Gray time always advances, so a peg can recover after the monkey lets go.
+ */
+export function tickPeg(peg: Peg, dt: number, counting: boolean): void {
+  const life = pegLife(peg.kind);
+  if (!Number.isFinite(life)) return;
+  if (peg.age >= life) {
+    peg.cool += dt;
+    if (peg.cool >= PEG_INVALID) {
+      peg.age = 0;
+      peg.cool = 0;
+    }
+    return;
+  }
+  if (counting) peg.age += dt;
+}
+
+/** Last PEG_WARN seconds of this peg's own hang time, while it is still usable. */
+export function pegWarn(peg: Peg): boolean {
+  const remain = pegRemain(peg);
+  return Number.isFinite(remain) && !pegSpent(peg) && remain <= PEG_WARN && remain > 0;
+}
+
+/** 0 at the start of the warning, 1 when the peg is about to turn gray. */
+export function pegUrgency(peg: Peg): number {
+  return 1 - Math.min(PEG_WARN, Math.max(0, pegRemain(peg))) / PEG_WARN;
+}
 
 export type Rng = () => number;
 
@@ -28,18 +83,19 @@ export function mulberry32(seed: number): Rng {
 }
 
 /** The other peg: shaft center, one fixed gap above the start peg. */
-export function nextPeg(prev: Peg, _rng: Rng, nextId: number): Peg {
-  return { id: nextId, x: SHAFT_CENTER, y: prev.y - PEG_UPPER_GAP, kind: 'blue' };
+export function nextPeg(prev: Peg, rng: Rng, nextId: number): Peg {
+  const kind: PegKind = rng() < RED_PEG_CHANCE ? 'red' : 'blue';
+  return makePeg(nextId, SHAFT_CENTER, prev.y - PEG_UPPER_GAP, kind);
 }
 
 export function firstPeg(id: number): Peg {
-  return { id, x: SHAFT_CENTER, y: PEG_LOWER_Y, kind: 'blue' };
+  return makePeg(id, SHAFT_CENTER, PEG_LOWER_Y, 'green');
 }
 
 /** Left and right of a peg, on that same row. */
 export function sidePegs(bottom: Peg, nextId: number): [Peg, Peg] {
   return [
-    { id: nextId, x: bottom.x - PEG_X_SPREAD, y: bottom.y, kind: 'blue' },
-    { id: nextId + 1, x: bottom.x + PEG_X_SPREAD, y: bottom.y, kind: 'blue' },
+    makePeg(nextId, bottom.x - PEG_X_SPREAD, bottom.y, 'blue'),
+    makePeg(nextId + 1, bottom.x + PEG_X_SPREAD, bottom.y, 'red'),
   ];
 }

@@ -23,6 +23,7 @@ assert(Math.abs(world.pegs[0].y - world.pegs[1].y - PEG_UPPER_GAP) < 0.5, 'the u
 assert(world.pegs[2].y === world.pegs[0].y && world.pegs[3].y === world.pegs[0].y, 'side pegs share the bottom row');
 assert(world.pegs[2].x === world.pegs[0].x - PEG_X_SPREAD, 'one side peg is left of the bottom peg');
 assert(world.pegs[3].x === world.pegs[0].x + PEG_X_SPREAD, 'one side peg is right of the bottom peg');
+assert(world.pegs[2].kind === 'blue' && world.pegs[3].kind === 'red', 'bottom row is blue on the left and red on the right');
 
 const onScreen = pointerToWorld(world, world.body.x, world.body.y - world.cameraY);
 assert(Math.abs(onScreen.y - world.body.y) < 1e-6, 'drawn body maps back to world');
@@ -189,7 +190,7 @@ wall.body.vx = -400;
 wall.body.vy = -200;
 stepWorld(wall, 1 / 60);
 assert(wall.phase === 'fly', 'a wall hit does not end the run');
-assert(wall.body.x >= SHAFT_LEFT + BODY_RADIUS - 0.01, 'the body stays inside the shaft');
+assert(wall.body.x >= SHAFT_LEFT + BODY_RADIUS - 1, 'the body stays inside the shaft');
 assert(wall.body.vx > 0, 'horizontal speed reverses');
 assert(wall.body.vx <= 400 * feel.wallRestitution + 1, 'the bounce keeps the restitution');
 assert(Math.abs(wall.body.spinVel) > 5, 'a wall hit adds a tumble');

@@ -9,7 +9,7 @@
  */
 
 /** Radians per second added for each px/s of velocity change in a wall hit. */
-import { firstPeg, nextPeg, sidePegs, type Peg, type Rng } from './pegs';
+import { firstPeg, nextPeg, pegSpent, sidePegs, tickPeg, type Peg, type Rng } from './pegs';
 import {
   createSim,
   simApplyArm,
@@ -86,6 +86,8 @@ export type SlingWorld = {
   flash: number;
   /** Seconds since the peg impact. Negative means no impact pose. */
   squash: number;
+  /** The finger is past the arm cap, and the wall did not stop it short. */
+  fullPull: boolean;
   /** Camera world y. Visible design y is world y minus this. */
   cameraY: number;
   /** Camera world x. A small follow of the body's sideways move. */
@@ -266,6 +268,7 @@ export function createWorld(rng: Rng): SlingWorld {
     pullY: 0,
     flash: 0,
     squash: -1,
+    fullPull: false,
     cameraY: origin.y + feel.restDrop - anchorY(),
     cameraX: 0,
     cameraVel: 0,
@@ -301,6 +304,7 @@ export function pointerToWorld(
 
 export function tryBeginDrag(world: SlingWorld, x: number, y: number): boolean {
   if (world.phase !== 'hang' && world.phase !== 'return') return false;
+  if (pegSpent(pegById(world, world.heldId))) return false;
   if (y > DRAG_BLOCK_Y) return false;
   const dx = x - world.body.x;
   const dy = y - world.body.y;
@@ -308,6 +312,7 @@ export function tryBeginDrag(world: SlingWorld, x: number, y: number): boolean {
   world.phase = 'drag';
   world.catch = null;
   world.squash = -1;
+  world.fullPull = false;
   world.body.vx = 0;
   world.body.vy = 0;
   world.pullX = 0;
@@ -322,6 +327,7 @@ export function dragTo(world: SlingWorld, x: number, y: number): void {
   let dy = y - peg.y;
   const reach = Math.hypot(dx, dy);
   const maxReach = armMax();
+  const wantedMax = reach >= maxReach - 0.5;
   if (reach > maxReach && reach > 0) {
     const scale = maxReach / reach;
     dx *= scale;
@@ -344,6 +350,7 @@ export function dragTo(world: SlingWorld, x: number, y: number): void {
   world.pullY = dy;
   world.body.x = peg.x + dx;
   world.body.y = peg.y + dy;
+  world.fullPull = wantedMax && Math.hypot(dx, dy) >= maxReach - 1;
 }
 
 /** Inside the dead zone the body eases back. Past it, the arm starts contracting. */
@@ -596,6 +603,7 @@ function stepFly(world: SlingWorld, dt: number): void {
       if (dist > feel.grabRadius) world.leftCleared = true;
       if (!world.leftCleared || world.leftLock > 0) continue;
     }
+    if (pegSpent(peg)) continue;
     if (dist <= bestDist) {
       best = peg;
       bestDist = dist;
@@ -643,7 +651,27 @@ function heldAim(world: SlingWorld): number {
   return Math.atan2(peg.x - world.body.x, -(peg.y - world.body.y));
 }
 
+function dropSpentHold(world: SlingWorld): void {
+  const held = world.pegs.find((peg) => peg.id === world.heldId);
+  if (!held || !pegSpent(held)) return;
+  if (world.phase !== 'hang' && world.phase !== 'drag' && world.phase !== 'return') return;
+  world.fullPull = false;
+  world.catch = null;
+  world.shot = null;
+  world.phase = 'fly';
+  world.leftId = held.id;
+  world.leftLock = feel.oldPegLock;
+  world.leftCleared = false;
+}
+
+function tickPegs(world: SlingWorld, dt: number): void {
+  const hanging = world.phase === 'hang' || world.phase === 'drag' || world.phase === 'return';
+  for (const peg of world.pegs) tickPeg(peg, dt, hanging && peg.id === world.heldId);
+}
+
 export function stepWorld(world: SlingWorld, dt: number): void {
+  tickPegs(world, dt);
+  dropSpentHold(world);
   world.flash = Math.max(0, world.flash - dt);
   if (world.squash >= 0) {
     world.squash += dt;

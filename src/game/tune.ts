@@ -127,5 +127,12 @@ export const PEG_LOWER_Y = feelDefaults.restDrop + LEG_DROP;
  * up by three rivet heights. +y is down, so the upper peg has the smaller y.
  */
 export const PEG_UPPER_GAP = PEG_LOWER_Y + 294 + PEG_DRAW_H * 3;
-/** How often a new peg is red. No dissolve yet. */
+/** How often a peg above the start row is red. */
 export const RED_PEG_CHANCE = 0.18;
+/** Seconds before a blue or red peg turns gray and cannot be grabbed. */
+export const BLUE_PEG_LIFE = 5;
+export const RED_PEG_LIFE = 3;
+/** How long a spent peg stays gray before its original color returns. */
+export const PEG_INVALID = 0.5;
+/** A hung blue or red peg starts flashing when this many seconds remain. */
+export const PEG_WARN = 2;
