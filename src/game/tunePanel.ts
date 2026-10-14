@@ -39,6 +39,7 @@ const groups: { title: string; rows: Row[] }[] = [
       { key: 'cameraOvershoot', label: '镜头冲出', min: 0, max: 80, step: 1 },
       { key: 'pegAnchor', label: '悬挂锚点', min: 0.45, max: 1.7, step: 0.01 },
       { key: 'hitSpin', label: '撞墙自转', min: 0, max: 0.16, step: 0.001 },
+      { key: 'launchSpin', label: '发射自转', min: 0, max: 20, step: 0.5 },
       { key: 'aimSpin', label: '瞄准转头', min: 0, max: 60, step: 0.5 },
       { key: 'catchSpin', label: '抓住转头', min: 0, max: 60, step: 0.5 },
       { key: 'settleSpin', label: '挂稳转头', min: 0, max: 60, step: 0.5 },

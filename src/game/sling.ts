@@ -165,8 +165,6 @@ function hangPoint(peg: Peg): { x: number; y: number } {
 
 /** Respawn uses this share of a full-pull launch. The full shot crosses the screen too fast. */
 const ENTER_LAUNCH = 0.8;
-/** Start spots left and right of the spawn peg. Each retry picks one. */
-const ENTER_OFFSETS = [-140, -120, -64, 64, 120, 170];
 
 /**
  * Velocity that reaches `dx, dy` under the same gravity at a fixed speed.
@@ -201,15 +199,15 @@ function shotAt(
 
 /**
  * After a death retry. A softer launch from as low as that speed can reach,
- * then the normal flight and grab. The body rolls once on the way in.
+ * starting at the horizontal place the body fell. Then the normal flight and grab.
+ * The body rolls once on the way in.
  */
-export function beginEnter(world: SlingWorld): void {
+export function beginEnter(world: SlingWorld, fromX: number): void {
   const peg = pegById(world, world.heldId);
   const speed = feel.armOmega * Math.max(0, armMax() - armSlack()) * ENTER_LAUNCH;
-  const offset = ENTER_OFFSETS[Math.floor(world.rng() * ENTER_OFFSETS.length)] ?? 64;
   const minX = SHAFT_LEFT + BODY_RADIUS;
   const maxX = SHAFT_RIGHT - BODY_RADIUS;
-  let x = Math.min(maxX, Math.max(minX, peg.x + offset));
+  let x = Math.min(maxX, Math.max(minX, fromX));
   let y = world.cameraY + DESIGN_HEIGHT + 40;
   let shot = shotAt(peg.x - x, peg.y - y, speed);
   while (!shot.ok && y > peg.y + feel.grabRadius + 8) {
@@ -440,12 +438,17 @@ export function endDrag(world: SlingWorld): void {
   const dx = world.body.x - peg.x;
   const dy = world.body.y - peg.y;
   const reach = Math.hypot(dx, dy) || 1;
+  const extension = Math.max(0, reach - armSlack());
   world.shot = {
     outX: dx / reach,
     outY: dy / reach,
-    extension: Math.max(0, reach - armSlack()),
+    extension,
     age: 0,
   };
+  // Longer pulls spin faster. A straight shot still rolls; the side only picks the direction.
+  const side = Math.sign(dx) || 1;
+  const fullStretch = Math.max(1e-4, armMax() - armSlack());
+  world.body.spinVel = side * feel.launchSpin * (extension / fullStretch);
   world.leftId = peg.id;
   world.leftLock = 0;
   world.leftCleared = false;
@@ -641,6 +644,7 @@ function stepLaunch(world: SlingWorld, dt: number): void {
   world.body.y = peg.y + shot.outY * reach;
   world.body.vx = -shot.outX * speed;
   world.body.vy = -shot.outY * speed;
+  world.body.spin += world.body.spinVel * dt;
   simWrite(world.sim, world.body.x, world.body.y, world.body.vx, world.body.vy);
   if (!done) return;
   world.shot = null;
@@ -747,9 +751,9 @@ export function stepWorld(world: SlingWorld, dt: number): void {
     world.squash += dt;
     if (world.squash > 0.34) world.squash = -1;
   }
-  // Drag, the dead-zone return, and the launch all show the crown toward the peg.
-  // The angle eases there, so letting go continues the same turn into the flight.
-  if (world.phase === 'drag' || world.phase === 'return' || world.phase === 'launch') {
+  // Drag and the dead-zone return show the crown toward the peg.
+  // A launch rolls instead, and that spinVel continues into the flight.
+  if (world.phase === 'drag' || world.phase === 'return') {
     easeSpin(world.body, heldAim(world), dt, feel.aimSpin);
   }
   if (world.phase === 'return') stepReturn(world, dt);

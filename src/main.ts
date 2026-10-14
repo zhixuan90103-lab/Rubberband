@@ -1079,9 +1079,10 @@ async function boot(): Promise<void> {
   let world: SlingWorld;
   let seed = 1;
   const retry = () => {
+    const fromX = world.body.x;
     seed += 1;
     world = createWorld(mulberry32(seed));
-    beginEnter(world);
+    beginEnter(world, fromX);
     idleTime = 0;
     idleBlend = 0;
     death.setOpen(false);

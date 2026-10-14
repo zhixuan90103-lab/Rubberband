@@ -87,6 +87,7 @@ assert(upward.phase === 'launch', 'an upward pull launches');
 for (let i = 0; i < 40 && upward.phase === 'launch'; i += 1) stepWorld(upward, 1 / 60);
 assert(upward.phase === 'fly', 'the upward pull goes slack');
 assert(upward.body.vy > 100, 'pulling above the peg launches downward');
+assert(Math.abs(Math.abs(upward.body.spinVel) - feel.launchSpin) < 0.05, 'a full pull spins at launchSpin');
 assert(
   Math.abs(Math.hypot(upward.body.vx, upward.body.vy) - feel.armOmega * (armMax() - armSlack())) < 1,
   'an upward pull leaves at the same speed as a downward one',
@@ -193,7 +194,7 @@ assert(wall.phase === 'fly', 'a wall hit does not end the run');
 assert(wall.body.x >= SHAFT_LEFT + BODY_RADIUS - 1, 'the body stays inside the shaft');
 assert(wall.body.vx > 0, 'horizontal speed reverses');
 assert(wall.body.vx <= 400 * feel.wallRestitution + 1, 'the bounce keeps the restitution');
-assert(Math.abs(wall.body.spinVel) > 5, 'a wall hit adds a tumble');
+assert(Math.abs(wall.body.spinVel) > 0.5, 'a wall hit adds a tumble');
 
 const rise = createWorld(mulberry32(7));
 const risePeg = rise.pegs[0];
@@ -274,16 +275,15 @@ for (let i = 0; i < 90; i += 1) stepWorld(look, 1 / 60);
 assert(Math.abs(look.cameraX) < 0.5, 'flight does not keep a sideways camera shift');
 
 const intro = createWorld(mulberry32(4));
-beginEnter(intro);
+const fellLeft = intro.pegs[0].x - 110;
+beginEnter(intro, fellLeft);
 assert(intro.phase === 'fly', 'respawn is a normal flight');
 assert(intro.body.y > intro.pegs[0].y + feel.restDrop, 'the flight starts below the hang');
-const sides = new Set<number>();
-for (let seed = 1; seed <= 24; seed += 1) {
-  const sample = createWorld(mulberry32(seed));
-  beginEnter(sample);
-  sides.add(Math.sign(sample.body.x - sample.pegs[0].x));
-}
-assert(sides.has(-1) && sides.has(1), 'respawn starts from both sides');
+assert(Math.abs(intro.body.x - fellLeft) < 1, 'respawn starts where the body fell');
+const fromRight = createWorld(mulberry32(5));
+const fellRight = fromRight.pegs[0].x + 130;
+beginEnter(fromRight, fellRight);
+assert(Math.abs(fromRight.body.x - fellRight) < 1, 'a fall on the right relaunches from the right');
 const introSpeed = Math.hypot(intro.body.vx, intro.body.vy);
 const fullLaunch = feel.armOmega * Math.max(0, armMax() - armSlack());
 assert(Math.abs(introSpeed - fullLaunch * 0.8) < 1, 'respawn speed is 0.8 of a full-pull launch');

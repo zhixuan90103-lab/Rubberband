@@ -30,6 +30,8 @@ export type Feel = {
   pegAnchor: number;
   /** Radians per second added for each px/s of velocity change in a wall hit. */
   hitSpin: number;
+  /** Spin rate at a full-length release, rad/s. Shorter pulls scale down with the stretch. */
+  launchSpin: number;
   /** Crown turn while aiming and launching, 1/s. */
   aimSpin: number;
   /** Crown turn during a catch, 1/s. */
@@ -53,7 +55,8 @@ export const feelDefaults: Feel = {
   cameraDamp: 0.36,
   cameraOvershoot: 6,
   pegAnchor: 0.7,
-  hitSpin: 0.015,
+  hitSpin: 0.002,
+  launchSpin: 4,
   aimSpin: 14,
   catchSpin: 10,
   settleSpin: 8,
