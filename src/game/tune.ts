@@ -96,8 +96,6 @@ export const SHAFT_RIGHT = DESIGN_WIDTH + WALL_FACE_OUT;
 /** Body circle. Matches the actor mesh. Walls stop this radius short of the shaft edge. */
 export const BODY_RADIUS = 36;
 export const SHAFT_CENTER = (SHAFT_LEFT + SHAFT_RIGHT) / 2;
-/** Side pegs sit this far left and right, so the row splits the shaft in four. */
-export const PEG_X_SPREAD = SHAFT_CENTER / 2;
 /**
  * A held peg inside this distance of the shaft center never shifts the camera
  * sideways. Pegs are not assumed to sit on the center line.
@@ -106,11 +104,30 @@ export const CAMERA_HOLD_HALF = 70;
 /** Sideways camera follow while pulling from an outer peg toward the wall. */
 export const CAMERA_X_GAIN = 0.55;
 export const CAMERA_X_MAX = 36;
-/** Unused while the layout is two centered pegs. */
-export const PEG_GAP_MIN = 100;
-export const PEG_GAP_MAX = 130;
-/** How many pegs to keep above the one you hold. This layout stops at two total. */
-export const PEGS_AHEAD = 1;
+/**
+ * Pair lanes, measured in from each design edge.
+ * The body stops 24px inside the screen, and a launch needs 85px of pull,
+ * so a peg at 48 cannot be dragged toward the wall. These stay at least that
+ * far in, and the two pegs of a row stay 146 to 170 apart.
+ */
+export const PEG_LANES = [110, 124] as const;
+/** Jump from one row to the next stays inside this distance. */
+export const PEG_JUMP_MIN = 200;
+export const PEG_JUMP_MAX = 600;
+/** How far the two pegs of one row sit apart in height. */
+export const PEG_ROW_STAGGER = 22;
+/** First peg above the birth cluster. Far enough that the next row stays off screen. */
+export const PEG_OPEN_SINGLE_GAP = 400;
+/** Later rows pick a gap in this range. Two of these do not fit above a hang. */
+export const PEG_GAP_MIN = 360;
+export const PEG_GAP_MAX = 460;
+/** A single sits somewhere in this band, not on a fixed center step. */
+export const PEG_SINGLE_X0 = 120;
+export const PEG_SINGLE_X1 = 270;
+/** Fixed peg slots. Rows reuse a slot instead of allocating another peg. */
+export const PEG_POOL = 18;
+/** Recycle a peg once it is this many screen heights away from the body. */
+export const PEG_RECYCLE_SCREENS = 1.5;
 /**
  * Foot-sprite center below the body center when the legs hang straight.
  * Face art is 242×223. The ankles sit on face pixel row 208.
@@ -122,9 +139,7 @@ const HEAD_H = HEAD_W * (FACE_H / FACE_W);
 export const LEG_DROP = (208 / FACE_H - 0.5) * HEAD_H;
 /** Start rivet sits on the hanging monkey's feet. */
 export const PEG_LOWER_Y = feelDefaults.restDrop + LEG_DROP;
-/** Center distance from the start rivet up to the next one. +y is down. */
-export const PEG_UPPER_GAP = 600;
-/** How often a peg above the start row is red. */
+/** How often a single peg after the opening is red. Pairs stay blue. */
 export const RED_PEG_CHANCE = 0.18;
 /** Seconds before a blue or red peg turns gray and cannot be grabbed. */
 export const BLUE_PEG_LIFE = 5;

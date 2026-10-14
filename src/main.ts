@@ -1084,13 +1084,6 @@ function syncView(
     flash.visible = false;
   }
 
-  const live = new Set(world.pegs.map((peg) => peg.id));
-  for (const [id, view] of pegViews) {
-    if (!live.has(id)) {
-      pegRoot.remove(view.group);
-      pegViews.delete(id);
-    }
-  }
   for (const peg of world.pegs) {
     let view = pegViews.get(peg.id);
     if (!view) {
@@ -1098,6 +1091,8 @@ function syncView(
       pegRoot.add(view.group);
       pegViews.set(peg.id, view);
     }
+    view.group.visible = peg.live;
+    if (!peg.live) continue;
     view.group.position.set(peg.x, peg.y, 0);
     if (world.grabPulse !== grabSeen.n && peg.id === world.heldId && world.grabPulse > 0) {
       view.burst = 0;

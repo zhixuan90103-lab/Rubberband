@@ -1,7 +1,8 @@
-import { mulberry32 } from './pegs';
+import { freshRowMemory, mulberry32, planRow, type PegSpot } from './pegs';
 import { initPhysics } from './sim';
 import { beginEnter, createWorld, dragTo, endDrag, pointerToWorld, stepWorld, tryBeginDrag } from './sling';
-import { armMax, armSlack, BLUE_PEG_LIFE, BODY_RADIUS, feel, PEG_LOWER_Y, PEG_UPPER_GAP, PEG_X_SPREAD, SHAFT_CENTER, SHAFT_LEFT, SHAFT_RIGHT } from './tune';
+import { DESIGN_HEIGHT } from '../adapt/design';
+import { armMax, armSlack, BLUE_PEG_LIFE, BODY_RADIUS, feel, PEG_JUMP_MAX, PEG_JUMP_MIN, PEG_LOWER_Y, PEG_OPEN_SINGLE_GAP, PEG_POOL, PEG_RECYCLE_SCREENS, SHAFT_CENTER, SHAFT_LEFT, SHAFT_RIGHT } from './tune';
 
 function shortestSpin(delta: number): number {
   const tau = Math.PI * 2;
@@ -15,15 +16,22 @@ function assert(cond: boolean, message: string): void {
 await initPhysics();
 
 const world = createWorld(mulberry32(1));
-assert(world.pegs.length === 4, `expected 4 pegs, got ${world.pegs.length}`);
+assert(world.pegs.length === PEG_POOL, `the peg pool stays at ${PEG_POOL}`);
 assert(world.body.y === world.pegs[0].y + feel.restDrop, 'body hangs below the peg');
-assert(world.pegs[1].x === world.pegs[0].x, 'the upper peg is centered on the start peg');
+assert(world.pegs[0].kind === 'green' && world.pegs[0].live, 'the birth peg is the green slot');
 assert(Math.abs(world.pegs[0].y - PEG_LOWER_Y) < 0.5, 'the start peg sits on the feet');
-assert(Math.abs(world.pegs[0].y - world.pegs[1].y - PEG_UPPER_GAP) < 0.5, 'the upper peg is 600px above the start peg');
-assert(world.pegs[2].y === world.pegs[0].y && world.pegs[3].y === world.pegs[0].y, 'side pegs share the bottom row');
-assert(world.pegs[2].x === world.pegs[0].x - PEG_X_SPREAD, 'one side peg is left of the bottom peg');
-assert(world.pegs[3].x === world.pegs[0].x + PEG_X_SPREAD, 'one side peg is right of the bottom peg');
-assert(world.pegs[2].kind === 'blue' && world.pegs[3].kind === 'red', 'bottom row is blue on the left and red on the right');
+assert(
+  world.pegs.filter((peg) => peg.live && Math.abs(peg.y - world.pegs[0].y) < 80).length === 1,
+  'the birth peg has no neighbours on its row',
+);
+const openingSingle = world.pegs.find(
+  (peg) => peg.live && Math.abs(peg.y - (world.pegs[0].y - PEG_OPEN_SINGLE_GAP)) < 0.5,
+);
+assert(openingSingle?.kind === 'blue' && openingSingle.x === SHAFT_CENTER, 'the first peg above the birth peg is centered and blue');
+const visible = world.pegs.filter(
+  (peg) => peg.live && peg.y >= world.cameraY && peg.y <= world.cameraY + DESIGN_HEIGHT,
+);
+assert(visible.length <= 5, `the opening screen shows ${visible.length} pegs`);
 
 const onScreen = pointerToWorld(world, world.body.x, world.body.y - world.cameraY);
 assert(Math.abs(onScreen.y - world.body.y) < 1e-6, 'drawn body maps back to world');
@@ -95,7 +103,8 @@ assert(
 
 const down = createWorld(mulberry32(8));
 const lower = down.pegs[0];
-const upper = down.pegs[1];
+const upper = down.pegs.find((peg) => peg.live && peg.x === lower.x && peg.y < lower.y - 100);
+if (!upper) throw new Error('the centered peg above the birth peg is missing');
 down.heldId = upper.id;
 down.body.x = upper.x;
 down.body.y = upper.y + feel.restDrop;
@@ -243,8 +252,11 @@ assert(Math.abs(shortestSpin(drop.body.spin)) < 0.25, 'a downward catch ends cro
 
 const look = createWorld(mulberry32(10));
 const centerPeg = look.pegs[0];
-const leftPeg = look.pegs.find((peg) => peg.x < SHAFT_CENTER - 1);
-const rightPeg = look.pegs.find((peg) => peg.x > SHAFT_CENTER + 1);
+look.phase = 'fall';
+look.cameraY = centerPeg.y - 2400;
+for (let i = 0; i < 20; i += 1) stepWorld(look, 1 / 60);
+const leftPeg = look.pegs.find((peg) => peg.live && peg.x < SHAFT_CENTER - 40);
+const rightPeg = look.pegs.find((peg) => peg.live && peg.x > SHAFT_CENTER + 40);
 if (!leftPeg || !rightPeg) throw new Error('side pegs missing');
 look.phase = 'drag';
 look.heldId = centerPeg.id;
@@ -303,7 +315,7 @@ assert(
 );
 
 const cooled = createWorld(mulberry32(9));
-const bluePeg = cooled.pegs[2];
+const bluePeg = cooled.pegs[1];
 cooled.heldId = bluePeg.id;
 cooled.body.x = bluePeg.x;
 cooled.body.y = bluePeg.y + feel.restDrop;
@@ -318,5 +330,56 @@ assert(bluePeg.age === BLUE_PEG_LIFE, 'the cooldown is still running');
 stepWorld(cooled, 1 / 60);
 stepWorld(cooled, 1 / 60);
 assert(bluePeg.age === 0 && bluePeg.cool === 0, 'the cooldown resets the hang timer');
+
+const pooled = createWorld(mulberry32(11));
+const before = pooled.pegs.length;
+pooled.phase = 'fall';
+pooled.cameraY = pooled.pegs[0].y - 2400;
+for (let i = 0; i < 40; i += 1) stepWorld(pooled, 1 / 60);
+assert(pooled.pegs.length === before, 'climbing does not allocate pegs');
+assert(
+  pooled.pegs.some((peg) => peg.live && peg.y < pooled.cameraY),
+  'a pooled slot is placed above the climbed camera',
+);
+assert(pooled.pegs[0].kind === 'green' && pooled.pegs[0].y === PEG_LOWER_Y, 'the birth peg stays while the body is still there');
+
+const ranged = createWorld(mulberry32(12));
+const limit = DESIGN_HEIGHT * PEG_RECYCLE_SCREENS;
+const stray = ranged.pegs.find((peg) => peg.live && peg.id !== ranged.heldId);
+if (!stray) throw new Error('a peg to push out of range is missing');
+stray.y = ranged.body.y + limit + 40;
+stepWorld(ranged, 1 / 60);
+assert(
+  ranged.pegs.every(
+    (peg) => !peg.live || peg.id === ranged.heldId || peg.id === ranged.leftId || Math.abs(peg.y - ranged.body.y) <= limit,
+  ),
+  'a peg more than one and a half screens from the body is recycled',
+);
+
+const wallClear = feel.restDrop + feel.minPull;
+const bodyMin = SHAFT_LEFT + BODY_RADIUS + wallClear;
+const bodyMax = SHAFT_RIGHT - BODY_RADIUS - wallClear;
+let rowMemory = freshRowMemory();
+let rowY = 0;
+let previous: PegSpot[] = [];
+const placed = planRow(0, rowY, mulberry32(3), rowMemory);
+rowMemory = placed.memory;
+rowY = placed.spots[0].y;
+previous = placed.spots;
+for (let index = 1; index < 40; index += 1) {
+  const plan = planRow(index, rowY, mulberry32(3), rowMemory);
+  for (const from of previous) {
+    for (const to of plan.spots) {
+      const distance = Math.hypot(from.x - to.x, from.y - to.y);
+      assert(distance >= PEG_JUMP_MIN - 1 && distance <= PEG_JUMP_MAX + 1, `row gap ${distance.toFixed(0)} is outside 200 to 600`);
+    }
+  }
+  for (const spot of plan.spots) {
+    assert(spot.x >= bodyMin - 1 && spot.x <= bodyMax + 1, `peg x ${spot.x.toFixed(0)} is too close to a wall to pull`);
+  }
+  rowMemory = plan.memory;
+  rowY = Math.min(...plan.spots.map((spot) => spot.y));
+  previous = plan.spots;
+}
 
 console.log('sling self-test ok');
