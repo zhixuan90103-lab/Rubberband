@@ -547,7 +547,6 @@ function grab(world: SlingWorld, peg: Peg): void {
     world.body.y = peg.y + dy;
   }
   const speed = Math.hypot(world.body.vx, world.body.vy) || 1;
-  world.body.spinVel = 0;
   world.catch = {
     held: true,
     dirX: world.body.vx / speed,
@@ -670,10 +669,10 @@ function stepCatch(world: SlingWorld, peg: Peg, dt: number): void {
     world.body.y > peg.y &&
     Math.abs(reach - feel.restDrop) < 4 &&
     speed < 40;
-  // The crown turn starts on the grab itself and always takes the long arc.
-  // Waiting for the arm to settle, or taking a 10° short arc, hides the turn.
+  // Same spring as aiming and settling. The goal was chosen on the grab,
+  // and the flight's spinVel is left alone so the roll bends into the turn.
   const goal = world.catch.spinFrom + world.catch.turn;
-  followSpin(world.body, goal, dt, catchTurnRate(world.catch.surge0));
+  steerSpin(world.body, goal, dt, catchTurnRate(world.catch.surge0));
   const landed = Math.abs(world.body.spin - goal) < 0.08 && Math.abs(world.body.spinVel) < 0.6;
   if (hung && landed) world.catch = null;
 }
@@ -685,12 +684,7 @@ function stepHang(world: SlingWorld, dt: number): void {
     return;
   }
   stepAttached(world, dt, false);
-  const before = world.body.spin;
-  easeSpin(world.body, 0, dt, feel.settleSpin);
-  if (before * world.body.spin < 0) {
-    world.body.spin = 0;
-    world.body.spinVel = 0;
-  }
+  steerSpin(world.body, nearestAngle(world.body.spin, 0), dt, feel.settleSpin);
 }
 
 function stepLaunch(world: SlingWorld, dt: number): void {
@@ -780,24 +774,20 @@ function catchTurnRate(arrivalSpeed: number): number {
   return feel.catchSpin * (0.4 + 0.6 * power);
 }
 
-/** Follow a moving angle. Stop on the goal instead of swinging past it. */
-function followSpin(body: Body, goal: number, dt: number, omega: number): void {
-  const delta = goal - body.spin;
-  body.spinVel += (omega * omega * delta - 2 * omega * body.spinVel) * dt;
-  const step = body.spinVel * dt;
-  if (delta === 0 || step * delta >= delta * delta) {
-    body.spin = goal;
-    body.spinVel = 0;
-    return;
-  }
-  body.spin += step;
+/** Absolute angle nearest to `spin` that faces `target`. */
+function nearestAngle(spin: number, target: number): number {
+  const tau = Math.PI * 2;
+  let delta = target - spin;
+  delta -= Math.round(delta / tau) * tau;
+  return spin + delta;
 }
 
-/** Shortest-arc spring. Keeps spinVel so a new target joins the turn already in motion. */
-function easeSpin(body: Body, target: number, dt: number, omega: number): void {
-  let delta = target - body.spin;
-  const tau = Math.PI * 2;
-  delta -= Math.round(delta / tau) * tau;
+/**
+ * One turn for every aimed pose. Critically damped, so a new goal
+ * keeps the spin the body already has and eases onto the new angle.
+ */
+function steerSpin(body: Body, goal: number, dt: number, omega: number): void {
+  const delta = goal - body.spin;
   body.spinVel += (omega * omega * delta - 2 * omega * body.spinVel) * dt;
   body.spin += body.spinVel * dt;
 }
@@ -835,10 +825,9 @@ export function stepWorld(world: SlingWorld, dt: number): void {
     world.squash += dt;
     if (world.squash > 0.34) world.squash = -1;
   }
-  // Drag and the dead-zone return show the crown toward the peg.
-  // A launch rolls instead, and that spinVel continues into the flight.
+  // Aimed poses share one spring. Launch and flight only keep spinVel.
   if (world.phase === 'drag' || world.phase === 'return') {
-    easeSpin(world.body, heldAim(world), dt, feel.aimSpin);
+    steerSpin(world.body, nearestAngle(world.body.spin, heldAim(world)), dt, feel.aimSpin);
   }
   if (world.phase === 'return') stepReturn(world, dt);
   else if (world.phase === 'launch') stepLaunch(world, dt);

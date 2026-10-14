@@ -52,7 +52,7 @@ export const feelDefaults: Feel = {
   grabStartRadius: 120,
   oldPegLock: 0.18,
   wallRestitution: 0.3,
-  cameraDamp: 0.36,
+  cameraDamp: 0.3,
   cameraOvershoot: 6,
   pegAnchor: 0.7,
   hitSpin: 0.002,
