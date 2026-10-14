@@ -24,6 +24,7 @@ import { mulberry32, pegSpent, pegUrgency, pegWarn } from './game/pegs';
 import { initPhysics } from './game/sim';
 import {
   advance,
+  beginEnter,
   createWorld,
   dragTo,
   endDrag,
@@ -62,6 +63,30 @@ const statusEl = document.getElementById('status');
 
 function setStatus(text: string): void {
   if (statusEl) statusEl.textContent = text;
+}
+
+function mountDeathScreen(root: HTMLElement, onRetry: () => void): { setOpen: (open: boolean) => void } {
+  const screen = document.createElement('section');
+  screen.id = 'death-screen';
+  const card = document.createElement('div');
+  card.className = 'death-card';
+  const line = document.createElement('p');
+  line.textContent = '掉出画面了';
+  const retry = document.createElement('button');
+  retry.type = 'button';
+  retry.textContent = '再来一次';
+  retry.addEventListener('click', (event) => {
+    event.stopPropagation();
+    onRetry();
+  });
+  card.append(line, retry);
+  screen.append(card);
+  root.append(screen);
+  return {
+    setOpen(open: boolean) {
+      screen.classList.toggle('open', open);
+    },
+  };
 }
 
 function makeOrtho(): THREE.OrthographicCamera {
@@ -963,6 +988,10 @@ function syncView(
   actorShadow.position.set(poseX + headW * 0.12, poseY + headH * 0.17, 0);
   actorShadow.rotation.z = 0;
   actorShadow.scale.set(actor.scale.x, 1, 1);
+  const alive = world.phase !== 'fall';
+  actor.visible = alive;
+  actorShadow.visible = alive;
+  for (const foot of feet) foot.mesh.visible = alive;
 
   if (!attached || !heldNow) {
     arms.visible = false;
@@ -989,6 +1018,10 @@ function syncView(
       (flash.material as THREE.MeshBasicMaterial).opacity = t;
     }
   } else {
+    flash.visible = false;
+  }
+  if (!alive) {
+    arms.visible = false;
     flash.visible = false;
   }
 
@@ -1043,12 +1076,24 @@ function syncView(
 
 async function boot(): Promise<void> {
   const ui = document.getElementById('ui-root');
+  let world: SlingWorld;
+  let seed = 1;
+  const retry = () => {
+    seed += 1;
+    world = createWorld(mulberry32(seed));
+    beginEnter(world);
+    idleTime = 0;
+    idleBlend = 0;
+    death.setOpen(false);
+  };
+  const death = ui ? mountDeathScreen(ui, retry) : { setOpen: () => {} };
   if (ui) mountTunePanel(ui);
   applyNativeClass();
   const native = Capacitor.isNativePlatform();
   const platform = Capacitor.getPlatform();
 
   await initPhysics();
+  world = createWorld(mulberry32(seed));
   const renderer = await createRenderer({ container: stage });
   renderer.domElement.style.pointerEvents = 'auto';
 
@@ -1056,8 +1101,6 @@ async function boot(): Promise<void> {
   const pegViews = new Map<number, PegView>();
 
   let layout: StageLayout | null = null;
-  let world = createWorld(mulberry32(1));
-  let seed = 1;
 
   const onLayout = (next: StageLayout) => {
     layout = next;
@@ -1091,13 +1134,7 @@ async function boot(): Promise<void> {
   renderer.domElement.addEventListener('pointerdown', (event) => {
     const design = designPoint(event);
     if (!design) return;
-    if (world.phase === 'fall') {
-      seed += 1;
-      world = createWorld(mulberry32(seed));
-      idleTime = 0;
-      idleBlend = 0;
-      return;
-    }
+    if (world.phase === 'fall') return;
     if (design.y > DRAG_BLOCK_Y) return;
     const point = pointerToWorld(world, design.x, design.y);
     if (!tryBeginDrag(world, point.x, point.y)) return;
@@ -1129,6 +1166,7 @@ async function boot(): Promise<void> {
     const frameDt = (now - last) / 1000;
     last = now;
     advance(world, frameDt);
+    death.setOpen(world.phase === 'fall');
     syncView(
       frameDt,
       world,
@@ -1152,8 +1190,7 @@ async function boot(): Promise<void> {
           ? pull < feel.minPull
             ? ` · under ${feel.minPull}`
             : ` · shot ${Math.min(pull, feel.maxPull)}`
-          : '') +
-        (world.phase === 'fall' ? '\ntap to restart' : ''),
+          : ''),
     );
     renderer.render(scene, camera);
   });

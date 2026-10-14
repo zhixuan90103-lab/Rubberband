@@ -163,6 +163,75 @@ function hangPoint(peg: Peg): { x: number; y: number } {
   return { x: peg.x, y: peg.y + feel.restDrop };
 }
 
+/** Respawn uses this share of a full-pull launch. The full shot crosses the screen too fast. */
+const ENTER_LAUNCH = 0.8;
+/** Start spots left and right of the spawn peg. Each retry picks one. */
+const ENTER_OFFSETS = [-140, -120, -64, 64, 120, 170];
+
+/**
+ * Velocity that reaches `dx, dy` under the same gravity at a fixed speed.
+ * `dx, dy` point from the body to the target. +y is down. `ok` is false when
+ * the speed cannot cover that distance.
+ */
+function shotAt(
+  dx: number,
+  dy: number,
+  speed: number,
+): { vx: number; vy: number; t: number; ok: boolean } {
+  const gravity = feel.gravity;
+  const reach = Math.hypot(dx, dy) || 1;
+  const straight = {
+    vx: (dx / reach) * speed,
+    vy: (dy / reach) * speed,
+    t: reach / speed,
+    ok: false,
+  };
+  const a = 0.25 * gravity * gravity;
+  const b = -dy * gravity - speed * speed;
+  const c = dx * dx + dy * dy;
+  const disc = b * b - 4 * a * c;
+  if (disc < 0 || a === 0) return straight;
+  const root = Math.sqrt(disc);
+  const times = [(-b - root) / (2 * a), (-b + root) / (2 * a)].filter((item) => item > 1e-6).sort((p, q) => p - q);
+  const u = times[0];
+  if (u === undefined) return straight;
+  const t = Math.sqrt(u);
+  return { vx: dx / t, vy: dy / t - 0.5 * gravity * t, t, ok: true };
+}
+
+/**
+ * After a death retry. A softer launch from as low as that speed can reach,
+ * then the normal flight and grab. The body rolls once on the way in.
+ */
+export function beginEnter(world: SlingWorld): void {
+  const peg = pegById(world, world.heldId);
+  const speed = feel.armOmega * Math.max(0, armMax() - armSlack()) * ENTER_LAUNCH;
+  const offset = ENTER_OFFSETS[Math.floor(world.rng() * ENTER_OFFSETS.length)] ?? 64;
+  const minX = SHAFT_LEFT + BODY_RADIUS;
+  const maxX = SHAFT_RIGHT - BODY_RADIUS;
+  let x = Math.min(maxX, Math.max(minX, peg.x + offset));
+  let y = world.cameraY + DESIGN_HEIGHT + 40;
+  let shot = shotAt(peg.x - x, peg.y - y, speed);
+  while (!shot.ok && y > peg.y + feel.grabRadius + 8) {
+    y -= 16;
+    shot = shotAt(peg.x - x, peg.y - y, speed);
+  }
+  world.body.x = x;
+  world.body.y = y;
+  world.body.vx = shot.vx;
+  world.body.vy = shot.vy;
+  world.body.spin = 0;
+  world.body.spinVel = (Math.PI * 2) / shot.t;
+  world.phase = 'fly';
+  world.catch = null;
+  world.shot = null;
+  world.squash = -1;
+  world.leftId = -1;
+  world.leftLock = 0;
+  world.leftCleared = true;
+  simWrite(world.sim, world.body.x, world.body.y, world.body.vx, world.body.vy);
+}
+
 function placeHang(world: SlingWorld, peg: Peg): void {
   const hang = hangPoint(peg);
   world.body.x = hang.x;
@@ -591,6 +660,7 @@ function stepFly(world: SlingWorld, dt: number): void {
   if (vxBefore * world.body.vx < 0 && Math.abs(vxBefore) > 80) {
     world.body.spinVel += (world.body.vx - vxBefore) * feel.hitSpin;
   }
+  world.body.spin += world.body.spinVel * dt;
 
   // The arm catches when the body reaches a peg. The peg then becomes the anchor.
   let best: Peg | null = null;
@@ -688,11 +758,13 @@ export function stepWorld(world: SlingWorld, dt: number): void {
   else if (world.phase === 'hang') stepHang(world, dt);
   placeCamera(world, dt);
   // A fast downward shot outruns the camera. Dying at the screen edge
-  // skips a peg that is still below the body. Fall only after the body
-  // has passed the lowest peg and left the camera.
+  // skips a peg that is still below the body. Fall only while moving
+  // downward, past the lowest peg, and off the bottom of the camera.
+  // An upward flight that starts below the screen is not a death.
   const lowest = world.pegs.reduce((y, peg) => Math.max(y, peg.y), -Infinity);
   if (
     (world.phase === 'fly' || world.phase === 'launch') &&
+    world.body.vy > 0 &&
     world.body.y > lowest + feel.grabRadius &&
     world.body.y > world.cameraY + DESIGN_HEIGHT
   ) {

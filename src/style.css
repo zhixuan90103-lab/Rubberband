@@ -153,6 +153,47 @@ header {
   z-index: 1;
 }
 
+#death-screen {
+  pointer-events: auto;
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+#death-screen.open {
+  display: flex;
+}
+
+#death-screen .death-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 22px 28px;
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.92);
+  color: #e2e8f0;
+}
+
+#death-screen p {
+  margin: 0;
+  font-size: 18px;
+}
+
+#death-screen button {
+  min-width: 148px;
+  min-height: 44px;
+  border: 0;
+  border-radius: 12px;
+  background: #f8fafc;
+  color: #0f172a;
+  font-size: 17px;
+}
+
 #tune-panel {
   pointer-events: auto;
   align-self: stretch;

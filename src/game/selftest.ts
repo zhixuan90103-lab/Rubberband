@@ -1,6 +1,6 @@
 import { mulberry32 } from './pegs';
 import { initPhysics } from './sim';
-import { createWorld, dragTo, endDrag, pointerToWorld, stepWorld, tryBeginDrag } from './sling';
+import { beginEnter, createWorld, dragTo, endDrag, pointerToWorld, stepWorld, tryBeginDrag } from './sling';
 import { armMax, armSlack, BODY_RADIUS, feel, PEG_LOWER_Y, PEG_UPPER_GAP, PEG_X_SPREAD, SHAFT_CENTER, SHAFT_LEFT, SHAFT_RIGHT } from './tune';
 
 function shortestSpin(delta: number): number {
@@ -272,5 +272,34 @@ look.heldId = rightPeg.id;
 look.body.x = rightPeg.x + 40;
 for (let i = 0; i < 90; i += 1) stepWorld(look, 1 / 60);
 assert(Math.abs(look.cameraX) < 0.5, 'flight does not keep a sideways camera shift');
+
+const intro = createWorld(mulberry32(4));
+beginEnter(intro);
+assert(intro.phase === 'fly', 'respawn is a normal flight');
+assert(intro.body.y > intro.pegs[0].y + feel.restDrop, 'the flight starts below the hang');
+const sides = new Set<number>();
+for (let seed = 1; seed <= 24; seed += 1) {
+  const sample = createWorld(mulberry32(seed));
+  beginEnter(sample);
+  sides.add(Math.sign(sample.body.x - sample.pegs[0].x));
+}
+assert(sides.has(-1) && sides.has(1), 'respawn starts from both sides');
+const introSpeed = Math.hypot(intro.body.vx, intro.body.vy);
+const fullLaunch = feel.armOmega * Math.max(0, armMax() - armSlack());
+assert(Math.abs(introSpeed - fullLaunch * 0.8) < 1, 'respawn speed is 0.8 of a full-pull launch');
+assert(intro.body.spinVel > 0, 'respawn rolls on the way in');
+assert(tryBeginDrag(intro, intro.body.x, intro.body.y) === false, 'a flight cannot be grabbed by a press');
+const spinBefore = intro.body.spin;
+stepWorld(intro, 1 / 60);
+assert(intro.body.spin > spinBefore, 'the roll advances during the flight');
+for (let i = 0; i < 180 && intro.phase === 'fly'; i += 1) stepWorld(intro, 1 / 60);
+assert(intro.phase === 'hang', 'the flight grabs the spawn peg');
+assert(intro.catch !== null, 'the grab uses the catch');
+for (let i = 0; i < 240 && intro.catch; i += 1) stepWorld(intro, 1 / 60);
+assert(intro.catch === null, 'the arm and gravity settle the catch');
+assert(
+  Math.abs(intro.body.y - (intro.pegs[0].y + feel.restDrop)) < 8,
+  'the entrance settles near the hang length',
+);
 
 console.log('sling self-test ok');
