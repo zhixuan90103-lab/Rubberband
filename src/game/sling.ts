@@ -664,15 +664,18 @@ function stepCatch(world: SlingWorld, peg: Peg, dt: number): void {
     const returned = Math.min(1, Math.max(0, 1 - left / world.catch.span));
     world.catch.progress = Math.max(world.catch.progress, 0.5 + returned * 0.5);
   }
-  const aimed = Math.min(1, world.catch.progress * 1.15);
-  followSpin(world.body, world.catch.spinFrom + world.catch.turn * aimed, dt, feel.catchSpin);
   const speed = Math.hypot(world.body.vx, world.body.vy);
   const hung =
     world.catch.stage === 'back' &&
     world.body.y > peg.y &&
     Math.abs(reach - feel.restDrop) < 4 &&
     speed < 40;
-  if (hung) world.catch = null;
+  // The crown turn starts on the grab itself and always takes the long arc.
+  // Waiting for the arm to settle, or taking a 10° short arc, hides the turn.
+  const goal = world.catch.spinFrom + world.catch.turn;
+  followSpin(world.body, goal, dt, catchTurnRate(world.catch.surge0));
+  const landed = Math.abs(world.body.spin - goal) < 0.08 && Math.abs(world.body.spinVel) < 0.6;
+  if (hung && landed) world.catch = null;
 }
 
 function stepHang(world: SlingWorld, dt: number): void {
@@ -754,15 +757,27 @@ function stepFly(world: SlingWorld, dt: number): void {
 }
 
 /**
- * Angle that lands on crown-up. A pose that is already close gets one turn,
- * so the grab is visible, and the turn stops on crown-up.
+ * Angle that lands on crown-up by the longer arc. A 10° miss therefore
+ * turns almost a full circle. Exactly upright takes a full turn; `sign`
+ * picks which way.
  */
 function turnToUpright(spin: number, sign: number): number {
   const tau = Math.PI * 2;
-  let delta = -spin;
-  delta -= Math.round(delta / tau) * tau;
-  if (Math.abs(delta) < 0.9) delta += (sign >= 0 ? 1 : -1) * tau;
-  return delta;
+  let short = -spin;
+  short -= Math.round(short / tau) * tau;
+  if (Math.abs(short) < 1e-3) return (sign >= 0 ? 1 : -1) * tau;
+  const longSign = short > 0 ? -1 : 1;
+  return longSign * (tau - Math.abs(short));
+}
+
+/**
+ * Panel `catchSpin` is the rate of a full-power arrival. A softer grab
+ * uses a slower turn, down to 40% when the body is nearly stopped.
+ */
+function catchTurnRate(arrivalSpeed: number): number {
+  const full = feel.armOmega * Math.max(1, armMax() - armSlack());
+  const power = Math.min(1, Math.max(0, arrivalSpeed / full));
+  return feel.catchSpin * (0.4 + 0.6 * power);
 }
 
 /** Follow a moving angle. Stop on the goal instead of swinging past it. */

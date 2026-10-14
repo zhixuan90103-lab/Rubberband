@@ -48,7 +48,7 @@ export const feelDefaults: Feel = {
   radialDamp: 17,
   tangentDamp: 9,
   gravity: 4000,
-  grabRadius: 36,
+  grabRadius: 46,
   grabStartRadius: 120,
   oldPegLock: 0.18,
   wallRestitution: 0.3,
@@ -56,10 +56,10 @@ export const feelDefaults: Feel = {
   cameraOvershoot: 6,
   pegAnchor: 0.7,
   hitSpin: 0.002,
-  launchSpin: 4,
+  launchSpin: 2,
   aimSpin: 14,
   catchSpin: 10,
-  settleSpin: 8,
+  settleSpin: 10,
 };
 
 export const feel: Feel = { ...feelDefaults };
