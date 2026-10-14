@@ -16,6 +16,11 @@ final class BridgeViewController: CAPBridgeViewController {
         false
     }
 
+    /// First swipe up from the bottom edge goes to the game. The next one goes home.
+    override var preferredScreenEdgesDeferringSystemGestures: UIRectEdge {
+        .bottom
+    }
+
     override func capacitorDidLoad() {
         super.capacitorDidLoad()
         bridge?.registerPluginInstance(AdvancedHapticsPlugin())

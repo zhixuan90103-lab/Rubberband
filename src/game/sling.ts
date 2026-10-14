@@ -488,6 +488,19 @@ export function dragTo(world: SlingWorld, x: number, y: number): void {
   world.fullPull = wantedMax && Math.hypot(dx, dy) >= maxReach - 1;
 }
 
+/** The system took the touch. Ease back even if the arm is already past a shot. */
+export function cancelDrag(world: SlingWorld): void {
+  if (world.phase !== 'drag') return;
+  world.pullX = 0;
+  world.pullY = 0;
+  world.fullPull = false;
+  world.shot = null;
+  world.body.vx = 0;
+  world.body.vy = 0;
+  simWrite(world.sim, world.body.x, world.body.y, 0, 0);
+  world.phase = 'return';
+}
+
 /** Inside the dead zone the body eases back. Past it, the arm starts contracting. */
 export function endDrag(world: SlingWorld): void {
   if (world.phase !== 'drag') return;

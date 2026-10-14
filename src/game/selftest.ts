@@ -1,6 +1,6 @@
 import { freshRowMemory, mulberry32, planRow, type PegSpot } from './pegs';
 import { initPhysics } from './sim';
-import { beginEnter, createWorld, dragTo, endDrag, pointerToWorld, stepWorld, tryBeginDrag } from './sling';
+import { beginEnter, cancelDrag, createWorld, dragTo, endDrag, pointerToWorld, stepWorld, tryBeginDrag } from './sling';
 import { DESIGN_HEIGHT } from '../adapt/design';
 import { armMax, armSlack, BLUE_PEG_LIFE, BODY_RADIUS, feel, PEG_JUMP_MAX, PEG_JUMP_MIN, PEG_LOWER_Y, PEG_OPEN_SINGLE_GAP, PEG_POOL, PEG_RECYCLE_SCREENS, SHAFT_CENTER, SHAFT_LEFT, SHAFT_RIGHT } from './tune';
 
@@ -48,6 +48,9 @@ dragTo(world, world.pegs[0].x, world.pegs[0].y + feel.restDrop + 10);
 endDrag(world);
 assert(world.phase === 'return', 'short pull eases back');
 assert(tryBeginDrag(world, world.body.x, world.body.y), 'press interrupts the return');
+dragTo(world, world.pegs[0].x, world.pegs[0].y + feel.restDrop + feel.minPull + 40);
+cancelDrag(world);
+assert(world.phase === 'return' && world.shot === null, 'a cancelled pull eases back without a shot');
 endDrag(world);
 
 assert(tryBeginDrag(world, world.body.x, world.body.y), 'press again');

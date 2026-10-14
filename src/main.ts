@@ -25,6 +25,7 @@ import { initPhysics } from './game/sim';
 import {
   advance,
   beginEnter,
+  cancelDrag,
   createWorld,
   dragTo,
   endDrag,
@@ -1260,34 +1261,52 @@ async function boot(): Promise<void> {
     return { x, y };
   };
 
+  let dragPointer: number | null = null;
+
+  const applyPointer = (event: PointerEvent): void => {
+    const design = designPoint(event);
+    if (!design) return;
+    const point = pointerToWorld(world, design.x, design.y);
+    dragTo(world, point.x, point.y);
+  };
+
+  const forgetPointer = (event: PointerEvent): void => {
+    dragPointer = null;
+    if (renderer.domElement.hasPointerCapture(event.pointerId)) {
+      renderer.domElement.releasePointerCapture(event.pointerId);
+    }
+  };
+
   renderer.domElement.addEventListener('pointerdown', (event) => {
+    if (dragPointer !== null) return;
     const design = designPoint(event);
     if (!design) return;
     if (world.phase === 'fall') return;
     if (design.y > DRAG_BLOCK_Y) return;
     const point = pointerToWorld(world, design.x, design.y);
     if (!tryBeginDrag(world, point.x, point.y)) return;
+    dragPointer = event.pointerId;
     dragTo(world, point.x, point.y);
     renderer.domElement.setPointerCapture(event.pointerId);
   });
 
   renderer.domElement.addEventListener('pointermove', (event) => {
-    if (world.phase !== 'drag') return;
-    const design = designPoint(event);
-    if (!design) return;
-    const point = pointerToWorld(world, design.x, design.y);
-    dragTo(world, point.x, point.y);
+    if (event.pointerId !== dragPointer) return;
+    applyPointer(event);
   });
 
-  const release = (event: PointerEvent) => {
-    if (world.phase !== 'drag') return;
+  renderer.domElement.addEventListener('pointerup', (event) => {
+    if (event.pointerId !== dragPointer) return;
+    applyPointer(event);
     endDrag(world);
-    if (renderer.domElement.hasPointerCapture(event.pointerId)) {
-      renderer.domElement.releasePointerCapture(event.pointerId);
-    }
-  };
-  renderer.domElement.addEventListener('pointerup', release);
-  renderer.domElement.addEventListener('pointercancel', release);
+    forgetPointer(event);
+  });
+
+  renderer.domElement.addEventListener('pointercancel', (event) => {
+    if (event.pointerId !== dragPointer) return;
+    cancelDrag(world);
+    forgetPointer(event);
+  });
 
   let last = performance.now();
   renderer.setAnimationLoop(() => {
