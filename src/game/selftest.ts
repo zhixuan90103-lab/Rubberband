@@ -66,7 +66,7 @@ assert(Math.abs(world.cameraY - camBefore) < 2, 'aim camera stays on the peg');
 endDrag(world);
 assert(world.aimId === openingSingle?.id, 'release locks the aimed peg');
 assert(world.aimRadius === feel.grabRadius, 'a direct hit does not widen the catch');
-assert(feel.grabRadius + AIM_EXTRA === 60, 'assist stops at 60');
+assert(feel.grabRadius + AIM_EXTRA === 70, 'assist stops at 70');
 assert(world.phase === 'launch', 'full pull starts the contraction');
 assert(Math.hypot(world.body.vx, world.body.vy) < 1, 'speed is still near zero at release');
 
