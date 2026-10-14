@@ -153,6 +153,7 @@ function bootScene(): {
   backdrop: THREE.Group;
   jungle: THREE.Texture;
   aimLine: THREE.Line;
+  wallRing: THREE.Mesh;
 } {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x9ed56a);
@@ -169,7 +170,10 @@ function bootScene(): {
   scene.add(arms);
 
   const { group: actor, eyes } = makeMonkey();
-  scene.add(actor);
+  // Flight squash lives on this parent so it follows velocity, not the spine.
+  const flex = new THREE.Group();
+  flex.add(actor);
+  scene.add(flex);
   const feet = makeFeet();
   scene.add(feet[0].mesh, feet[1].mesh);
 
@@ -187,6 +191,15 @@ function bootScene(): {
     }),
   );
   scene.add(flash);
+
+  const wallRing = new THREE.Mesh(
+    new THREE.PlaneGeometry(PEG_W * 1.75, PEG_W * 1.75),
+    burstMaterial(pegRing),
+  );
+  wallRing.renderOrder = 9;
+  wallRing.position.z = 1.4;
+  wallRing.visible = false;
+  scene.add(wallRing);
 
   const center = new THREE.Mesh(
     new THREE.CircleGeometry(9, 20),
@@ -221,7 +234,7 @@ function bootScene(): {
   aimLine.frustumCulled = false;
   scene.add(aimLine);
 
-  return { scene, camera, actor, eyes, feet, actorShadow, arms, flash, center, pegRoot, backdrop, jungle, aimLine };
+  return { scene, camera, actor, eyes, feet, actorShadow, arms, flash, center, pegRoot, backdrop, jungle, aimLine, wallRing };
 }
 
 /**
@@ -300,6 +313,15 @@ function makeFoot(lx: number, ly: number, width: number, height: number): Foot {
  */
 let idleTime = 0;
 let maxShake = 0;
+/** Seconds since the last wall contact. -1 is no hit. */
+let wallClock = -1;
+let wallFlat = 1;
+let flyVx = 0;
+let inFly = false;
+/** Seconds into the wall-hit ring. Negative means idle. */
+let wallBurst = -1;
+let wallHitX = 0;
+let wallHitY = 0;
 /** 0 while swinging or airborne, 1 in a settled hang. Fades so the idle does not pop on. */
 let idleBlend = 0;
 let eyeClock = 0;
@@ -447,6 +469,48 @@ function pegImpact(t: number): { along: number; cross: number } {
   if (t < 0.08) along = squash + (stretch - squash) * smoothStep(t / 0.08);
   else if (t < 0.34) along = stretch + (1 - stretch) * smoothStep((t - 0.08) / 0.26);
   return { along, cross: 1 / along };
+}
+
+/**
+ * Airborne ball. Local +y of the flex group runs along velocity.
+ * Slow (the top of the arc) stays round. Fast travel stretches, and the
+ * other axis shrinks so the area stays 1.
+ */
+function flightBall(vx: number, vy: number): { rot: number; x: number; y: number } {
+  const speed = Math.hypot(vx, vy);
+  if (speed < 200) return { rot: 0, x: 1, y: 1 };
+  const u = smoothStep(Math.min(1, Math.max(0, (speed - 200) / 1600)));
+  const along = 1 + 0.09 * u;
+  return { rot: Math.atan2(-vx, vy), x: 1 / along, y: along };
+}
+
+function lerpAngle(from: number, to: number, t: number): number {
+  let delta = to - from;
+  delta -= Math.round(delta / (Math.PI * 2)) * Math.PI * 2;
+  return from + delta * t;
+}
+
+function mixPose(
+  a: { rot: number; x: number; y: number },
+  b: { rot: number; x: number; y: number },
+  t: number,
+): { rot: number; x: number; y: number } {
+  return {
+    rot: lerpAngle(a.rot, b.rot, t),
+    x: a.x + (b.x - a.x) * t,
+    y: a.y + (b.y - a.y) * t,
+  };
+}
+
+/** Scale a world offset by the flex pose. Uniform scale leaves it unchanged. */
+function flexPoint(x: number, y: number, rot: number, sx: number, sy: number): { x: number; y: number } {
+  const c = Math.cos(rot);
+  const s = Math.sin(rot);
+  const lx = c * x + s * y;
+  const ly = -s * x + c * y;
+  const px = lx * sx;
+  const py = ly * sy;
+  return { x: c * px - s * py, y: s * px + c * py };
 }
 
 /** Settled-hang breath, pixels. +y is down, so this only lifts the body. */
@@ -1012,6 +1076,7 @@ function syncView(
   jungle: THREE.Texture,
   grabSeen: { n: number },
   aimLine: THREE.Line,
+  wallRing: THREE.Mesh,
 ): void {
   camera.position.x = world.cameraX;
   camera.position.y = world.cameraY;
@@ -1074,8 +1139,60 @@ function syncView(
   const handY = poseY;
   const armFacing = (attached ? aim : world.body.spin) + rock;
   const poseFacing = world.body.spin + (motion.lean + motion.whip) * idleBlend;
-  actor.position.set(poseX, poseY, 0.4);
-  actor.rotation.z = poseFacing;
+  const flex = actor.parent as THREE.Group;
+  flex.position.set(poseX, poseY, 0.4);
+  actor.position.set(0, 0, 0);
+  const flying = world.phase === 'fly';
+  let ball = { rot: 0, x: 1, y: 1 };
+  if (!flying) {
+    inFly = false;
+    wallClock = -1;
+  } else {
+    if (!inFly) {
+      inFly = true;
+      flyVx = world.body.vx;
+    } else if (flyVx * world.body.vx < 0 && Math.abs(flyVx) > 80) {
+      const power = Math.min(1, Math.max(0, (Math.abs(flyVx) - 80) / 1000));
+      wallFlat = 1 - 0.11 * power;
+      wallClock = 0;
+      wallBurst = 0;
+      wallHitX = flyVx < 0 ? SHAFT_LEFT : SHAFT_RIGHT;
+      wallHitY = world.body.y;
+    }
+    flyVx = world.body.vx;
+    const flight = flightBall(world.body.vx, world.body.vy);
+    ball = flight;
+    if (wallClock >= 0) {
+      wallClock += dt;
+      const round = { rot: flight.rot, x: 1, y: 1 };
+      const flat = { rot: 0, x: wallFlat, y: 1 / wallFlat };
+      if (wallClock < 0.03) ball = mixPose(flight, round, smoothStep(wallClock / 0.03));
+      else if (wallClock < 0.08) ball = mixPose(round, flat, smoothStep((wallClock - 0.03) / 0.05));
+      else if (wallClock < 0.18) ball = mixPose(flat, flight, smoothStep((wallClock - 0.08) / 0.1));
+      else wallClock = -1;
+    }
+  }
+  flex.rotation.z = ball.rot;
+  flex.scale.set(ball.x, ball.y, 1);
+  actor.rotation.z = poseFacing - ball.rot;
+  if (wallBurst < 0) {
+    wallRing.visible = false;
+  } else {
+    wallBurst += dt;
+    const u = wallBurst / PEG_BURST;
+    if (u >= 1) {
+      wallBurst = -1;
+      wallRing.visible = false;
+    } else {
+      const fade = (1 - u) * (1 - u);
+      const ringMat = wallRing.material as THREE.MeshBasicMaterial;
+      ringMat.color.setRGB(246 / 255, 233 / 255, 220 / 255, THREE.SRGBColorSpace);
+      ringMat.opacity = fade * 0.55;
+      wallRing.visible = true;
+      wallRing.position.set(wallHitX, wallHitY, 1.4);
+      wallRing.scale.setScalar(0.72 + u * 1.9);
+    }
+  }
   center.position.set(world.body.x, world.body.y, 2);
   center.visible = guides.show;
   const stretch = Math.min(0.07, Math.abs(rock) * 0.28 + Math.abs(bob) * 0.008);
@@ -1100,7 +1217,8 @@ function syncView(
   for (const foot of feet) {
     const ox = (cos * foot.lx - sin * foot.ly) * actor.scale.x;
     const oy = (sin * foot.lx + cos * foot.ly) * actor.scale.y;
-    stepFoot(foot, poseX + ox, poseY + oy, step, footRest);
+    const placed = flexPoint(ox, oy, ball.rot, ball.x, ball.y);
+    stepFoot(foot, poseX + placed.x, poseY + placed.y, step, footRest);
   }
   const { headW, headH } = monkeySize();
   actorShadow.position.set(poseX + headW * 0.12, poseY + headH * 0.17, 0);
@@ -1249,6 +1367,7 @@ async function boot(): Promise<void> {
     world = createWorld(mulberry32(seed));
     beginEnter(world, fromX);
     grabSeen.n = 0;
+    wallBurst = -1;
     idleTime = 0;
     idleBlend = 0;
     death.setOpen(false);
@@ -1264,7 +1383,7 @@ async function boot(): Promise<void> {
   const renderer = await createRenderer({ container: stage });
   renderer.domElement.style.pointerEvents = 'auto';
 
-  const { scene, camera, actor, eyes, feet, actorShadow, arms, flash, center, pegRoot, backdrop, jungle, aimLine } = bootScene();
+  const { scene, camera, actor, eyes, feet, actorShadow, arms, flash, center, pegRoot, backdrop, jungle, aimLine, wallRing } = bootScene();
   const pegViews = new Map<number, PegView>();
 
   let layout: StageLayout | null = null;
@@ -1369,6 +1488,7 @@ async function boot(): Promise<void> {
       jungle,
       grabSeen,
       aimLine,
+      wallRing,
     );
     const pull = Math.round(pullLength(world));
     setStatus(
