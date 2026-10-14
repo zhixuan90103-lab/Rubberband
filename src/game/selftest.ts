@@ -1,7 +1,7 @@
 import { mulberry32 } from './pegs';
 import { initPhysics } from './sim';
 import { beginEnter, createWorld, dragTo, endDrag, pointerToWorld, stepWorld, tryBeginDrag } from './sling';
-import { armMax, armSlack, BODY_RADIUS, feel, PEG_LOWER_Y, PEG_UPPER_GAP, PEG_X_SPREAD, SHAFT_CENTER, SHAFT_LEFT, SHAFT_RIGHT } from './tune';
+import { armMax, armSlack, BLUE_PEG_LIFE, BODY_RADIUS, feel, PEG_LOWER_Y, PEG_UPPER_GAP, PEG_X_SPREAD, SHAFT_CENTER, SHAFT_LEFT, SHAFT_RIGHT } from './tune';
 
 function shortestSpin(delta: number): number {
   const tau = Math.PI * 2;
@@ -301,5 +301,22 @@ assert(
   Math.abs(intro.body.y - (intro.pegs[0].y + feel.restDrop)) < 8,
   'the entrance settles near the hang length',
 );
+
+const cooled = createWorld(mulberry32(9));
+const bluePeg = cooled.pegs[2];
+cooled.heldId = bluePeg.id;
+cooled.body.x = bluePeg.x;
+cooled.body.y = bluePeg.y + feel.restDrop;
+for (let i = 0; i < 30; i += 1) stepWorld(cooled, 1 / 60);
+assert(bluePeg.age > 0.4, 'hanging on a blue peg counts down');
+assert(tryBeginDrag(cooled, cooled.body.x, cooled.body.y), 'press to leave the blue peg');
+dragTo(cooled, bluePeg.x, bluePeg.y + feel.restDrop + feel.minPull + 5);
+endDrag(cooled);
+assert(bluePeg.age === BLUE_PEG_LIFE && bluePeg.cool === 0, 'letting go starts the peg cooldown');
+for (let i = 0; i < 29; i += 1) stepWorld(cooled, 1 / 60);
+assert(bluePeg.age === BLUE_PEG_LIFE, 'the cooldown is still running');
+stepWorld(cooled, 1 / 60);
+stepWorld(cooled, 1 / 60);
+assert(bluePeg.age === 0 && bluePeg.cool === 0, 'the cooldown resets the hang timer');
 
 console.log('sling self-test ok');

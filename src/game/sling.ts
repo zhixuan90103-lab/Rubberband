@@ -9,7 +9,7 @@
  */
 
 /** Radians per second added for each px/s of velocity change in a wall hit. */
-import { firstPeg, nextPeg, pegSpent, sidePegs, tickPeg, type Peg, type Rng } from './pegs';
+import { beginPegCooldown, firstPeg, nextPeg, pegSpent, sidePegs, tickPeg, type Peg, type Rng } from './pegs';
 import {
   createSim,
   simApplyArm,
@@ -165,6 +165,16 @@ function hangPoint(peg: Peg): { x: number; y: number } {
 
 /** Respawn uses this share of a full-pull launch. The full shot crosses the screen too fast. */
 const ENTER_LAUNCH = 0.8;
+/** First try is this far below the screen. Each miss steps the start upward. */
+const ENTER_BELOW = 40;
+const ENTER_RAISE = 16;
+
+/** Full-pull rate is `launchSpin`. Shorter pulls scale with the stretch. Straight up still rolls. */
+function releaseSpin(dx: number, extension: number): number {
+  const side = Math.sign(dx) || 1;
+  const fullStretch = Math.max(1e-4, armMax() - armSlack());
+  return side * feel.launchSpin * (extension / fullStretch);
+}
 
 /**
  * Velocity that reaches `dx, dy` under the same gravity at a fixed speed.
@@ -198,28 +208,37 @@ function shotAt(
 }
 
 /**
- * After a death retry. A softer launch from as low as that speed can reach,
- * starting at the horizontal place the body fell. Then the normal flight and grab.
- * The body rolls once on the way in.
+ * One ordinary flight back to the spawn peg. `fromX` is where the body fell.
+ * The start is as low as this launch speed can still reach the peg.
  */
-export function beginEnter(world: SlingWorld, fromX: number): void {
-  const peg = pegById(world, world.heldId);
+function respawnFlight(
+  peg: Peg,
+  fromX: number,
+  cameraY: number,
+): { x: number; y: number; vx: number; vy: number; t: number } {
   const speed = feel.armOmega * Math.max(0, armMax() - armSlack()) * ENTER_LAUNCH;
   const minX = SHAFT_LEFT + BODY_RADIUS;
   const maxX = SHAFT_RIGHT - BODY_RADIUS;
   let x = Math.min(maxX, Math.max(minX, fromX));
-  let y = world.cameraY + DESIGN_HEIGHT + 40;
+  let y = cameraY + DESIGN_HEIGHT + ENTER_BELOW;
   let shot = shotAt(peg.x - x, peg.y - y, speed);
   while (!shot.ok && y > peg.y + feel.grabRadius + 8) {
-    y -= 16;
+    y -= ENTER_RAISE;
     shot = shotAt(peg.x - x, peg.y - y, speed);
   }
-  world.body.x = x;
-  world.body.y = y;
-  world.body.vx = shot.vx;
-  world.body.vy = shot.vy;
+  return { x, y, vx: shot.vx, vy: shot.vy, t: shot.t };
+}
+
+/** After a death retry. Same flight and grab as any other shot, plus one roll. */
+export function beginEnter(world: SlingWorld, fromX: number): void {
+  const peg = pegById(world, world.heldId);
+  const flight = respawnFlight(peg, fromX, world.cameraY);
+  world.body.x = flight.x;
+  world.body.y = flight.y;
+  world.body.vx = flight.vx;
+  world.body.vy = flight.vy;
   world.body.spin = 0;
-  world.body.spinVel = (Math.PI * 2) / shot.t;
+  world.body.spinVel = (Math.PI * 2) / flight.t;
   world.phase = 'fly';
   world.catch = null;
   world.shot = null;
@@ -445,10 +464,8 @@ export function endDrag(world: SlingWorld): void {
     extension,
     age: 0,
   };
-  // Longer pulls spin faster. A straight shot still rolls; the side only picks the direction.
-  const side = Math.sign(dx) || 1;
-  const fullStretch = Math.max(1e-4, armMax() - armSlack());
-  world.body.spinVel = side * feel.launchSpin * (extension / fullStretch);
+  world.body.spinVel = releaseSpin(dx, extension);
+  beginPegCooldown(peg);
   world.leftId = peg.id;
   world.leftLock = 0;
   world.leftCleared = false;

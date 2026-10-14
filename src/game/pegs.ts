@@ -33,21 +33,34 @@ export function pegRemain(peg: Peg): number {
   return pegLife(peg.kind) - peg.age;
 }
 
-/** Gray only during the invalid gap after this peg's own hang time runs out. */
-export function pegSpent(peg: Peg): boolean {
+/** Usable, or in the gray cooldown. Green is never in cooldown. */
+function pegOnCooldown(peg: Peg): boolean {
   const life = pegLife(peg.kind);
-  if (!Number.isFinite(life)) return false;
-  return peg.age >= life && peg.cool < PEG_INVALID;
+  return Number.isFinite(life) && peg.age >= life;
+}
+
+/** Gray, and not yet recovered. */
+export function pegSpent(peg: Peg): boolean {
+  return pegOnCooldown(peg) && peg.cool < PEG_INVALID;
 }
 
 /**
- * One peg's clock. `counting` is true only for the peg the monkey is on.
- * Gray time always advances, so a peg can recover after the monkey lets go.
+ * Usable pegs become cooldown on a real release. Green and an ongoing
+ * cooldown stay as they are. Recovery still goes through `tickPeg`.
+ */
+export function beginPegCooldown(peg: Peg): void {
+  if (!Number.isFinite(pegLife(peg.kind)) || pegOnCooldown(peg)) return;
+  peg.age = pegLife(peg.kind);
+  peg.cool = 0;
+}
+
+/**
+ * Hang time counts only while `counting`. Cooldown always runs, then both
+ * clocks return to zero and the peg is usable again.
  */
 export function tickPeg(peg: Peg, dt: number, counting: boolean): void {
-  const life = pegLife(peg.kind);
-  if (!Number.isFinite(life)) return;
-  if (peg.age >= life) {
+  if (!Number.isFinite(pegLife(peg.kind))) return;
+  if (pegOnCooldown(peg)) {
     peg.cool += dt;
     if (peg.cool >= PEG_INVALID) {
       peg.age = 0;
