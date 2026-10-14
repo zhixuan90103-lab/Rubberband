@@ -322,6 +322,28 @@ let inFly = false;
 let wallBurst = -1;
 let wallHitX = 0;
 let wallHitY = 0;
+/** Seconds into the death shake. Negative means idle. Fires once per fall. */
+let deathShake = -1;
+let deathWasFall = false;
+
+const DEATH_SHAKE = 0.34;
+
+/**
+ * One fall, one shake. The first swing is downward (+y). Trauma squared
+ * eases it out. The sideways sine uses another phase so the path is not
+ * one locked diagonal. Time is in seconds, so the rate does not follow fps.
+ */
+function deathOffset(t: number): { x: number; y: number } {
+  if (t < 0 || t >= DEATH_SHAKE) return { x: 0, y: 0 };
+  const u = t / DEATH_SHAKE;
+  const trauma = 1 - u;
+  const amp = trauma * trauma;
+  const swing = Math.sin(u * 1.5 * Math.PI * 2);
+  return {
+    x: 3.5 * amp * Math.sin(u * 1.5 * Math.PI * 2 + 1.7),
+    y: 10 * amp * swing,
+  };
+}
 /** 0 while swinging or airborne, 1 in a settled hang. Fades so the idle does not pop on. */
 let idleBlend = 0;
 let eyeClock = 0;
@@ -1078,8 +1100,21 @@ function syncView(
   aimLine: THREE.Line,
   wallRing: THREE.Mesh,
 ): void {
-  camera.position.x = world.cameraX;
-  camera.position.y = world.cameraY;
+  if (world.phase === 'fall') {
+    if (!deathWasFall) deathShake = 0;
+    deathWasFall = true;
+  } else {
+    deathWasFall = false;
+    deathShake = -1;
+  }
+  const shake = deathOffset(deathShake);
+  if (deathShake >= 0) {
+    deathShake += dt;
+    if (deathShake >= DEATH_SHAKE) deathShake = -1;
+  }
+  camera.position.x = world.cameraX + shake.x;
+  camera.position.y = world.cameraY + shake.y;
+  camera.rotation.z = 0;
   camera.updateMatrixWorld();
   backdrop.position.y = world.cameraY;
   const tileH = jungle.userData.tileH as number | undefined;
