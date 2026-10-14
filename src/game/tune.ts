@@ -48,7 +48,7 @@ export const feelDefaults: Feel = {
   radialDamp: 17,
   tangentDamp: 9,
   gravity: 4000,
-  grabRadius: 46,
+  grabRadius: 40,
   grabStartRadius: 120,
   oldPegLock: 0.18,
   wallRestitution: 0.3,
@@ -63,6 +63,12 @@ export const feelDefaults: Feel = {
 };
 
 export const feel: Feel = { ...feelDefaults };
+
+/** Catch radius added for the one peg a shot is clearly aimed at. 40 grows to 60. */
+export const AIM_EXTRA = 20;
+
+/** Grab rings, the body center, and the aim curve. */
+export const guides = { show: true };
 
 export function resetFeel(): void {
   Object.assign(feel, feelDefaults);

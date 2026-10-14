@@ -243,6 +243,18 @@ header {
   -webkit-overflow-scrolling: touch;
 }
 
+.tune-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 2px;
+  font-size: 12px;
+}
+
+.tune-switch input {
+  pointer-events: auto;
+}
+
 #tune-panel.closed .tune-body,
 #tune-panel.closed .tune-derived,
 #tune-panel.closed .tune-bar button:not(:first-child) {

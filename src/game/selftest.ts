@@ -1,8 +1,8 @@
 import { freshRowMemory, mulberry32, planRow, type PegSpot } from './pegs';
 import { initPhysics } from './sim';
-import { beginEnter, cancelDrag, createWorld, dragTo, endDrag, pointerToWorld, stepWorld, tryBeginDrag } from './sling';
+import { beginEnter, cancelDrag, createWorld, dragTo, endDrag, pointerToWorld, readAim, stepWorld, tryBeginDrag } from './sling';
 import { DESIGN_HEIGHT } from '../adapt/design';
-import { armMax, armSlack, BLUE_PEG_LIFE, BODY_RADIUS, feel, PEG_JUMP_MAX, PEG_JUMP_MIN, PEG_LOWER_Y, PEG_OPEN_SINGLE_GAP, PEG_POOL, PEG_RECYCLE_SCREENS, SHAFT_CENTER, SHAFT_LEFT, SHAFT_RIGHT } from './tune';
+import { AIM_EXTRA, armMax, armSlack, BLUE_PEG_LIFE, BODY_RADIUS, feel, PEG_JUMP_MAX, PEG_JUMP_MIN, PEG_LOWER_Y, PEG_OPEN_SINGLE_GAP, PEG_POOL, PEG_RECYCLE_SCREENS, SHAFT_CENTER, SHAFT_LEFT, SHAFT_RIGHT } from './tune';
 
 function shortestSpin(delta: number): number {
   const tau = Math.PI * 2;
@@ -56,10 +56,17 @@ endDrag(world);
 assert(tryBeginDrag(world, world.body.x, world.body.y), 'press again');
 const peg = world.pegs[0];
 dragTo(world, peg.x, world.body.y + feel.maxPull);
+const aimed = readAim(world);
+assert(aimed.points.length > 8, 'the aim curve follows the flight');
+assert(aimed.pegId === openingSingle?.id, 'a straight pull aims at the peg above');
+assert(aimed.radius === feel.grabRadius, 'a direct pass keeps the normal catch');
 const camBefore = world.cameraY;
 stepWorld(world, 1 / 60);
 assert(Math.abs(world.cameraY - camBefore) < 2, 'aim camera stays on the peg');
 endDrag(world);
+assert(world.aimId === openingSingle?.id, 'release locks the aimed peg');
+assert(world.aimRadius === feel.grabRadius, 'a direct hit does not widen the catch');
+assert(feel.grabRadius + AIM_EXTRA === 60, 'assist stops at 60');
 assert(world.phase === 'launch', 'full pull starts the contraction');
 assert(Math.hypot(world.body.vx, world.body.vy) < 1, 'speed is still near zero at release');
 

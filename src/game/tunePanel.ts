@@ -1,4 +1,4 @@
-import { armMax, armSlack, feel, resetFeel, type Feel } from './tune';
+import { armMax, armSlack, feel, guides, resetFeel, type Feel } from './tune';
 
 type Row = {
   key: keyof Feel;
@@ -75,6 +75,19 @@ export function mountTunePanel(root: HTMLElement): void {
   const body = document.createElement('div');
   body.className = 'tune-body';
   const inputs: HTMLInputElement[] = [];
+
+  const guideLabel = document.createElement('label');
+  guideLabel.className = 'tune-switch';
+  const guideInput = document.createElement('input');
+  guideInput.type = 'checkbox';
+  guideInput.checked = guides.show;
+  const guideName = document.createElement('span');
+  guideName.textContent = '显示辅助';
+  guideInput.addEventListener('change', () => {
+    guides.show = guideInput.checked;
+  });
+  guideLabel.append(guideInput, guideName);
+  body.append(guideLabel);
 
   const refresh = () => {
     const slack = armSlack();

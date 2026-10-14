@@ -36,6 +36,7 @@ import {
   armSlack,
   BODY_RADIUS,
   DRAG_BLOCK_Y,
+  AIM_EXTRA,
   feel,
   FIXED_DT,
   PEG_RECYCLE_SCREENS,
@@ -107,6 +108,10 @@ export type SlingWorld = {
   grabPulse: number;
   /** The finger is past the arm cap, and the wall did not stop it short. */
   fullPull: boolean;
+  /** Peg given a wider catch for this shot. -1 means no assist. */
+  aimId: number;
+  /** Catch radius used for `aimId` until the flight grabs or ends. */
+  aimRadius: number;
   /** Camera world y. Visible design y is world y minus this. */
   cameraY: number;
   /** Camera world x. A small follow of the body's sideways move. */
@@ -286,6 +291,8 @@ export function beginEnter(world: SlingWorld, fromX: number): void {
   world.catch = null;
   world.shot = null;
   world.squash = -1;
+  world.aimId = -1;
+  world.aimRadius = feel.grabRadius;
   world.leftId = -1;
   world.leftLock = 0;
   world.leftCleared = true;
@@ -401,6 +408,8 @@ export function createWorld(rng: Rng): SlingWorld {
     squash: -1,
     grabPulse: 0,
     fullPull: false,
+    aimId: -1,
+    aimRadius: feel.grabRadius,
     cameraY: 0,
     cameraX: 0,
     cameraVel: 0,
@@ -495,10 +504,97 @@ export function cancelDrag(world: SlingWorld): void {
   world.pullY = 0;
   world.fullPull = false;
   world.shot = null;
+  world.aimId = -1;
+  world.aimRadius = feel.grabRadius;
   world.body.vx = 0;
   world.body.vy = 0;
   simWrite(world.sim, world.body.x, world.body.y, 0, 0);
   world.phase = 'return';
+}
+
+export type AimRead = {
+  points: { x: number; y: number }[];
+  pegId: number;
+  radius: number;
+};
+
+/**
+ * The flight this pull would take, and the one peg it is clearly aimed at.
+ * The curve uses the same release point, speed, and gravity as a real shot.
+ */
+export function readAim(world: SlingWorld): AimRead {
+  const none = (points: { x: number; y: number }[]): AimRead => ({
+    points,
+    pegId: -1,
+    radius: feel.grabRadius,
+  });
+  if (world.phase !== 'drag') return none([]);
+  const peg = pegById(world, world.heldId);
+  const dx = world.body.x - peg.x;
+  const dy = world.body.y - peg.y;
+  const reach = Math.hypot(dx, dy) || 1;
+  const extension = Math.max(0, reach - armSlack());
+  if (extension < 1) return none([]);
+  const outX = dx / reach;
+  const outY = dy / reach;
+  const speed = feel.armOmega * extension;
+  let x = peg.x + outX * armSlack();
+  let y = peg.y + outY * armSlack();
+  let vx = -outX * speed;
+  let vy = -outY * speed;
+  const dt = 1 / 60;
+  const left = SHAFT_LEFT + BODY_RADIUS;
+  const right = SHAFT_RIGHT - BODY_RADIUS;
+  const points = [{ x, y }];
+  const misses = new Map<number, number>();
+  const floor = world.cameraY + DESIGN_HEIGHT + 40;
+  for (let i = 0; i < 110; i += 1) {
+    vy += feel.gravity * dt;
+    x += vx * dt;
+    y += vy * dt;
+    if (x < left) {
+      x = left;
+      vx = Math.abs(vx) * feel.wallRestitution;
+    } else if (x > right) {
+      x = right;
+      vx = -Math.abs(vx) * feel.wallRestitution;
+    }
+    points.push({ x, y });
+    for (const candidate of world.pegs) {
+      if (!candidate.live || pegSpent(candidate) || candidate.id === peg.id) continue;
+      const dist = Math.hypot(candidate.x - x, candidate.y - y);
+      const prev = misses.get(candidate.id);
+      if (prev === undefined || dist < prev) misses.set(candidate.id, dist);
+    }
+    if (y > floor && vy > 0) break;
+  }
+  let pegId = -1;
+  let secondId = -1;
+  let first = Infinity;
+  let second = Infinity;
+  for (const [id, dist] of misses) {
+    if (dist < first) {
+      second = first;
+      secondId = pegId;
+      first = dist;
+      pegId = id;
+    } else if (dist < second) {
+      second = dist;
+      secondId = id;
+    }
+  }
+  const cap = feel.grabRadius + AIM_EXTRA;
+  if (pegId < 0 || first > cap) return none(points);
+  const radius = first <= feel.grabRadius ? feel.grabRadius : cap;
+  // Aiming between two pegs still assists the nearer one, unless the
+  // widened catch would overlap the other peg's catch.
+  if (radius > feel.grabRadius && secondId >= 0 && second <= cap) {
+    const chosen = pegById(world, pegId);
+    const other = pegById(world, secondId);
+    const gap = Math.hypot(chosen.x - other.x, chosen.y - other.y);
+    if (gap <= radius + cap) return none(points);
+  }
+  return { points, pegId, radius };
 }
 
 /** Inside the dead zone the body eases back. Past it, the arm starts contracting. */
@@ -513,9 +609,12 @@ export function endDrag(world: SlingWorld): void {
   simWrite(world.sim, world.body.x, world.body.y, 0, 0);
   if (length < feel.minPull) {
     world.shot = null;
+    world.aimId = -1;
+    world.aimRadius = feel.grabRadius;
     world.phase = 'return';
     return;
   }
+  const aim = readAim(world);
   const dx = world.body.x - peg.x;
   const dy = world.body.y - peg.y;
   const reach = Math.hypot(dx, dy) || 1;
@@ -532,6 +631,8 @@ export function endDrag(world: SlingWorld): void {
   world.leftLock = 0;
   world.leftCleared = false;
   world.flash = 0.12;
+  world.aimId = aim.pegId;
+  world.aimRadius = aim.radius;
   world.phase = 'launch';
 }
 
@@ -551,6 +652,8 @@ function grab(world: SlingWorld, peg: Peg): void {
   world.grabPulse += 1;
   world.pullX = 0;
   world.pullY = 0;
+  world.aimId = -1;
+  world.aimRadius = feel.grabRadius;
   if (reach < 1) {
     const dir = Math.hypot(world.body.vx, world.body.vy) || 1;
     dx = (world.body.vx / dir) * 14;
@@ -745,7 +848,7 @@ function stepFly(world: SlingWorld, dt: number): void {
 
   // The arm catches when the body reaches a peg. The peg then becomes the anchor.
   let best: Peg | null = null;
-  let bestDist = feel.grabRadius;
+  let bestDist = Infinity;
   for (const peg of world.pegs) {
     const dx = world.body.x - peg.x;
     const dy = world.body.y - peg.y;
@@ -755,7 +858,8 @@ function stepFly(world: SlingWorld, dt: number): void {
       if (!world.leftCleared || world.leftLock > 0) continue;
     }
     if (!peg.live || pegSpent(peg)) continue;
-    if (dist <= bestDist) {
+    const limit = peg.id === world.aimId ? world.aimRadius : feel.grabRadius;
+    if (dist <= limit && dist < bestDist) {
       best = peg;
       bestDist = dist;
     }

@@ -30,6 +30,7 @@ import {
   dragTo,
   endDrag,
   pointerToWorld,
+  readAim,
   pullLength,
   restart,
   tryBeginDrag,
@@ -39,6 +40,7 @@ import { mountTunePanel } from './game/tunePanel';
 import {
   BODY_RADIUS,
   DRAG_BLOCK_Y,
+  guides,
   SHAFT_LEFT,
   SHAFT_RIGHT,
   armMax,
@@ -150,6 +152,7 @@ function bootScene(): {
   pegRoot: THREE.Group;
   backdrop: THREE.Group;
   jungle: THREE.Texture;
+  aimLine: THREE.Line;
 } {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x9ed56a);
@@ -203,7 +206,22 @@ function bootScene(): {
   center.position.z = 4;
   scene.add(center);
 
-  return { scene, camera, actor, eyes, feet, actorShadow, arms, flash, center, pegRoot, backdrop, jungle };
+  const aimLine = new THREE.Line(
+    new THREE.BufferGeometry(),
+    new THREE.LineBasicMaterial({
+      color: 0xfff3a0,
+      transparent: true,
+      opacity: 0.95,
+      depthTest: false,
+      toneMapped: false,
+    }),
+  );
+  aimLine.renderOrder = 8;
+  aimLine.visible = false;
+  aimLine.frustumCulled = false;
+  scene.add(aimLine);
+
+  return { scene, camera, actor, eyes, feet, actorShadow, arms, flash, center, pegRoot, backdrop, jungle, aimLine };
 }
 
 /**
@@ -993,6 +1011,7 @@ function syncView(
   backdrop: THREE.Group,
   jungle: THREE.Texture,
   grabSeen: { n: number },
+  aimLine: THREE.Line,
 ): void {
   camera.position.x = world.cameraX;
   camera.position.y = world.cameraY;
@@ -1058,6 +1077,7 @@ function syncView(
   actor.position.set(poseX, poseY, 0.4);
   actor.rotation.z = poseFacing;
   center.position.set(world.body.x, world.body.y, 2);
+  center.visible = guides.show;
   const stretch = Math.min(0.07, Math.abs(rock) * 0.28 + Math.abs(bob) * 0.008);
   // Local +y runs crown to feet. A full pull lengthens that axis to 1.2.
   let along = 1;
@@ -1123,6 +1143,14 @@ function syncView(
     flash.visible = false;
   }
 
+  const dragAim = guides.show && world.phase === 'drag' ? readAim(world) : null;
+  if (!dragAim || dragAim.points.length < 2) {
+    aimLine.visible = false;
+  } else {
+    aimLine.visible = true;
+    aimLine.geometry.setFromPoints(dragAim.points.map((point) => new THREE.Vector3(point.x, point.y, 1)));
+  }
+
   for (const peg of world.pegs) {
     let view = pegViews.get(peg.id);
     if (!view) {
@@ -1133,7 +1161,16 @@ function syncView(
     view.group.visible = peg.live;
     if (!peg.live) continue;
     view.group.position.set(peg.x, peg.y, 0);
-    view.grab.scale.setScalar(feel.grabRadius);
+    const assisted =
+      (dragAim && peg.id === dragAim.pegId) ||
+      (!dragAim && peg.id === world.aimId);
+    const catchRadius = assisted
+      ? dragAim && peg.id === dragAim.pegId
+        ? dragAim.radius
+        : world.aimRadius
+      : feel.grabRadius;
+    view.grab.visible = guides.show;
+    view.grab.scale.setScalar(catchRadius);
     if (world.grabPulse !== grabSeen.n && peg.id === world.heldId && world.grabPulse > 0) {
       view.burst = 0;
     }
@@ -1227,7 +1264,7 @@ async function boot(): Promise<void> {
   const renderer = await createRenderer({ container: stage });
   renderer.domElement.style.pointerEvents = 'auto';
 
-  const { scene, camera, actor, eyes, feet, actorShadow, arms, flash, center, pegRoot, backdrop, jungle } = bootScene();
+  const { scene, camera, actor, eyes, feet, actorShadow, arms, flash, center, pegRoot, backdrop, jungle, aimLine } = bootScene();
   const pegViews = new Map<number, PegView>();
 
   let layout: StageLayout | null = null;
@@ -1331,6 +1368,7 @@ async function boot(): Promise<void> {
       backdrop,
       jungle,
       grabSeen,
+      aimLine,
     );
     const pull = Math.round(pullLength(world));
     setStatus(
