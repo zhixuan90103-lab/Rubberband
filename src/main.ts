@@ -104,6 +104,8 @@ type PegView = {
   gray: THREE.Mesh;
   flash: THREE.Mesh;
   ring: THREE.Mesh;
+  /** Grab radius. Scale is the live `grabRadius`. */
+  grab: THREE.Mesh;
   blink: number;
   /** Seconds into the catch burst. Negative means idle. */
   burst: number;
@@ -142,6 +144,8 @@ function bootScene(): {
   actorShadow: THREE.Mesh;
   arms: THREE.Mesh;
   flash: THREE.Mesh;
+  /** Physics body center. Grab tests this point, not the drawn sprite. */
+  center: THREE.Mesh;
   pegRoot: THREE.Group;
   backdrop: THREE.Group;
   jungle: THREE.Texture;
@@ -180,7 +184,25 @@ function bootScene(): {
   );
   scene.add(flash);
 
-  return { scene, camera, actor, eyes, feet, actorShadow, arms, flash, pegRoot, backdrop, jungle };
+  const center = new THREE.Mesh(
+    new THREE.CircleGeometry(9, 20),
+    new THREE.MeshBasicMaterial({
+      color: 0xff1a1a,
+      transparent: true,
+      opacity: 1,
+      depthTest: false,
+      depthWrite: false,
+      toneMapped: false,
+      side: THREE.DoubleSide,
+    }),
+  );
+  // Sprites are transparent, so they paint after every opaque mesh.
+  // This dot has to be transparent too, and later than the peg rings.
+  center.renderOrder = 1000;
+  center.position.z = 4;
+  scene.add(center);
+
+  return { scene, camera, actor, eyes, feet, actorShadow, arms, flash, center, pegRoot, backdrop, jungle };
 }
 
 /**
@@ -936,8 +958,22 @@ function makePegView(): PegView {
   ring.renderOrder = 9;
   ring.position.z = 1.4;
   ring.visible = false;
-  group.add(shadow, back, blue, red, green, gray, flash, ring);
-  return { group, back, blue, red, green, gray, flash, ring, blink: 0, burst: -1 };
+  const grab = new THREE.Mesh(
+    new THREE.RingGeometry(0.94, 1, 64),
+    new THREE.MeshBasicMaterial({
+      color: 0xffe28a,
+      transparent: true,
+      opacity: 0.9,
+      depthWrite: false,
+      depthTest: false,
+      toneMapped: false,
+      side: THREE.DoubleSide,
+    }),
+  );
+  grab.renderOrder = 6;
+  grab.position.z = 0.6;
+  group.add(shadow, back, blue, red, green, gray, flash, ring, grab);
+  return { group, back, blue, red, green, gray, flash, ring, grab, blink: 0, burst: -1 };
 }
 
 function syncView(
@@ -950,6 +986,7 @@ function syncView(
   actorShadow: THREE.Mesh,
   arms: THREE.Mesh,
   flash: THREE.Mesh,
+  center: THREE.Mesh,
   pegRoot: THREE.Group,
   pegViews: Map<number, PegView>,
   backdrop: THREE.Group,
@@ -1019,6 +1056,7 @@ function syncView(
   const poseFacing = world.body.spin + (motion.lean + motion.whip) * idleBlend;
   actor.position.set(poseX, poseY, 0.4);
   actor.rotation.z = poseFacing;
+  center.position.set(world.body.x, world.body.y, 2);
   const stretch = Math.min(0.07, Math.abs(rock) * 0.28 + Math.abs(bob) * 0.008);
   // Local +y runs crown to feet. A full pull lengthens that axis to 1.2.
   let along = 1;
@@ -1094,6 +1132,7 @@ function syncView(
     view.group.visible = peg.live;
     if (!peg.live) continue;
     view.group.position.set(peg.x, peg.y, 0);
+    view.grab.scale.setScalar(feel.grabRadius);
     if (world.grabPulse !== grabSeen.n && peg.id === world.heldId && world.grabPulse > 0) {
       view.burst = 0;
     }
@@ -1187,7 +1226,7 @@ async function boot(): Promise<void> {
   const renderer = await createRenderer({ container: stage });
   renderer.domElement.style.pointerEvents = 'auto';
 
-  const { scene, camera, actor, eyes, feet, actorShadow, arms, flash, pegRoot, backdrop, jungle } = bootScene();
+  const { scene, camera, actor, eyes, feet, actorShadow, arms, flash, center, pegRoot, backdrop, jungle } = bootScene();
   const pegViews = new Map<number, PegView>();
 
   let layout: StageLayout | null = null;
@@ -1267,6 +1306,7 @@ async function boot(): Promise<void> {
       actorShadow,
       arms,
       flash,
+      center,
       pegRoot,
       pegViews,
       backdrop,
