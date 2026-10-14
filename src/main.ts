@@ -103,11 +103,14 @@ type PegView = {
   green: THREE.Mesh;
   gray: THREE.Mesh;
   flash: THREE.Mesh;
+  ring: THREE.Mesh;
   blink: number;
+  /** Seconds into the catch burst. Negative means idle. */
+  burst: number;
 };
 
 /** Ring and back plate share a 129×123 canvas. One size keeps them aligned. */
-const PEG_W = 52;
+const PEG_W = 52 * 0.8;
 /** Additive core flash, slow at 2s left and fast as the peg is about to turn gray. */
 const PEG_FLASH_HZ = { slow: 2, fast: 12 };
 /** Sampled centers of the blue and red rivet art. */
@@ -120,6 +123,8 @@ const PEG_FLASH_WHITE = 0.85;
 /** Extra energy on that light color. Above 1 so the bright frame reaches white before the 8-bit target clips. */
 const PEG_FLASH_PEAK = 1.5;
 const PEG_H = PEG_W * (123 / 129);
+/** Catch ring expands and fades over this many seconds. */
+const PEG_BURST = 0.36;
 
 /** Face art is 242×223. Pupils and feet are placed in that pixel frame. */
 const FACE_W = 242;
@@ -828,6 +833,55 @@ function makeShadow(width: number, height: number, solid = 0, opacity = 1): THRE
   return mesh;
 }
 
+/** Hollow ring: the hole fades out, the outer rim stays a hard edge. */
+function pegRingMap(): THREE.CanvasTexture {
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    const mid = size / 2;
+    const image = ctx.createImageData(size, size);
+    const data = image.data;
+    for (let y = 0; y < size; y += 1) {
+      for (let x = 0; x < size; x += 1) {
+        const r = Math.hypot(x - mid + 0.5, y - mid + 0.5) / mid;
+        const inner = Math.min(1, Math.max(0, (r - 0.42) / 0.4));
+        const alpha = r <= 0.96 ? inner : 0;
+        const i = (y * size + x) * 4;
+        data[i] = 255;
+        data[i + 1] = 255;
+        data[i + 2] = 255;
+        data[i + 3] = Math.round(alpha * 255);
+      }
+    }
+    ctx.putImageData(image, 0, 0);
+  }
+  const map = new THREE.CanvasTexture(canvas);
+  map.colorSpace = THREE.SRGBColorSpace;
+  map.premultiplyAlpha = true;
+  map.needsUpdate = true;
+  return map;
+}
+
+const pegRing = pegRingMap();
+
+function burstMaterial(map: THREE.Texture | null): THREE.MeshBasicMaterial {
+  return new THREE.MeshBasicMaterial({
+    map: map ?? undefined,
+    color: 0xffffff,
+    transparent: true,
+    premultipliedAlpha: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    depthTest: false,
+    toneMapped: false,
+    side: THREE.DoubleSide,
+    opacity: 0,
+  });
+}
+
 function makePegView(): PegView {
   const group = new THREE.Group();
   const shadow = makeShadow(PEG_W * 1.25, PEG_W * 0.88, 0.3, 0.65);
@@ -878,8 +932,12 @@ function makePegView(): PegView {
   flash.position.z = 1.2;
   flash.scale.setScalar(1);
   flash.visible = false;
-  group.add(shadow, back, blue, red, green, gray, flash);
-  return { group, back, blue, red, green, gray, flash, blink: 0 };
+  const ring = new THREE.Mesh(new THREE.PlaneGeometry(PEG_W * 1.15, PEG_W * 1.15), burstMaterial(pegRing));
+  ring.renderOrder = 9;
+  ring.position.z = 1.4;
+  ring.visible = false;
+  group.add(shadow, back, blue, red, green, gray, flash, ring);
+  return { group, back, blue, red, green, gray, flash, ring, blink: 0, burst: -1 };
 }
 
 function syncView(
@@ -896,6 +954,7 @@ function syncView(
   pegViews: Map<number, PegView>,
   backdrop: THREE.Group,
   jungle: THREE.Texture,
+  grabSeen: { n: number },
 ): void {
   camera.position.x = world.cameraX;
   camera.position.y = world.cameraY;
@@ -1040,6 +1099,9 @@ function syncView(
       pegViews.set(peg.id, view);
     }
     view.group.position.set(peg.x, peg.y, 0);
+    if (world.grabPulse !== grabSeen.n && peg.id === world.heldId && world.grabPulse > 0) {
+      view.burst = 0;
+    }
     const spent = pegSpent(peg);
     const green = peg.kind === 'green';
     view.back.visible = true;
@@ -1071,18 +1133,50 @@ function syncView(
       view.flash.visible = false;
       flashMat.opacity = 0;
     }
+    const cap = view.red.visible ? view.red : view.blue.visible ? view.blue : view.green.visible ? view.green : view.gray;
+    const capMat = cap.material as THREE.MeshBasicMaterial;
+    if (view.burst < 0) {
+      capMat.color.setRGB(1, 1, 1);
+      view.ring.visible = false;
+      continue;
+    }
+    view.burst += dt;
+    const u = view.burst / PEG_BURST;
+    if (u >= 1) {
+      view.burst = -1;
+      capMat.color.setRGB(1, 1, 1);
+      view.ring.visible = false;
+      continue;
+    }
+    const fade = (1 - u) * (1 - u);
+    capMat.color.setRGB(1, 1, 1);
+    capMat.color.multiplyScalar(1 + 2.4 * fade);
+    const ringMat = view.ring.material as THREE.MeshBasicMaterial;
+    const tint = peg.kind === 'red' ? PEG_FLASH_COLOR.red : peg.kind === 'green' ? [0.45, 0.9, 0.4] : PEG_FLASH_COLOR.blue;
+    ringMat.color.setRGB(
+      0.55 + tint[0] * 0.45,
+      0.55 + tint[1] * 0.45,
+      0.55 + tint[2] * 0.45,
+      THREE.SRGBColorSpace,
+    );
+    ringMat.opacity = fade;
+    view.ring.visible = true;
+    view.ring.scale.setScalar(0.72 + u * 1.9);
   }
+  grabSeen.n = world.grabPulse;
 }
 
 async function boot(): Promise<void> {
   const ui = document.getElementById('ui-root');
   let world: SlingWorld;
   let seed = 1;
+  const grabSeen = { n: 0 };
   const retry = () => {
     const fromX = world.body.x;
     seed += 1;
     world = createWorld(mulberry32(seed));
     beginEnter(world, fromX);
+    grabSeen.n = 0;
     idleTime = 0;
     idleBlend = 0;
     death.setOpen(false);
@@ -1182,6 +1276,7 @@ async function boot(): Promise<void> {
       pegViews,
       backdrop,
       jungle,
+      grabSeen,
     );
     const pull = Math.round(pullLength(world));
     setStatus(

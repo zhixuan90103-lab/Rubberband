@@ -19,7 +19,7 @@ assert(world.pegs.length === 4, `expected 4 pegs, got ${world.pegs.length}`);
 assert(world.body.y === world.pegs[0].y + feel.restDrop, 'body hangs below the peg');
 assert(world.pegs[1].x === world.pegs[0].x, 'the upper peg is centered on the start peg');
 assert(Math.abs(world.pegs[0].y - PEG_LOWER_Y) < 0.5, 'the start peg sits on the feet');
-assert(Math.abs(world.pegs[0].y - world.pegs[1].y - PEG_UPPER_GAP) < 0.5, 'the upper peg is three rivets higher');
+assert(Math.abs(world.pegs[0].y - world.pegs[1].y - PEG_UPPER_GAP) < 0.5, 'the upper peg is 600px above the start peg');
 assert(world.pegs[2].y === world.pegs[0].y && world.pegs[3].y === world.pegs[0].y, 'side pegs share the bottom row');
 assert(world.pegs[2].x === world.pegs[0].x - PEG_X_SPREAD, 'one side peg is left of the bottom peg');
 assert(world.pegs[3].x === world.pegs[0].x + PEG_X_SPREAD, 'one side peg is right of the bottom peg');

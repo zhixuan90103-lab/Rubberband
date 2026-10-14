@@ -16,7 +16,7 @@
 | `src/game/selftest.ts` | 死区、上下发射速率相同、抓取、旧钉锁、墙、重开 |
 | `src/main.ts` | WebGPU 场景、手臂、钉子、待机、墙和阴影、指针、死亡界面。身体角度用 `body.spin` |
 
-摆钉：开局四颗。中线下面是绿色出生钉，在挂着的脚的位置。上面那颗高出 `PEG_UPPER_GAP`，按 `RED_PEG_CHANCE` 决定红或蓝。最下面一行左边蓝、右边红，把设计宽度四等分。抓住最上面那颗不再往前铺钉。蓝钉挂满 5 秒、红钉挂满 3 秒变灰，0.5 秒后恢复。计时细节在 [PHYSICS-PLAN.md](./PHYSICS-PLAN.md)。
+摆钉：开局四颗。中线下面是绿色出生钉，在挂着的脚的位置。上面那颗高出 `PEG_UPPER_GAP`（600 px），按 `RED_PEG_CHANCE` 决定红或蓝。最下面一行左边蓝、右边红，把设计宽度四等分。抓住最上面那颗不再往前铺钉。铆钉画面是 41.6×39.7。蓝钉挂满 5 秒、红钉挂满 3 秒变灰，松手发射也会立刻变灰，0.5 秒后恢复。抓住时铆钉发亮，圆环向外扩开。计时和特效细节在 [PHYSICS-PLAN.md](./PHYSICS-PLAN.md)。
 
 拉射的现行行为以 [PHYSICS-PLAN.md](./PHYSICS-PLAN.md) 为准。包名是 `com.wangzhixuan.rubberband`，主屏幕名 Rubberband，避免盖掉别的底座包。
 

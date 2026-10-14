@@ -111,9 +111,6 @@ export const PEG_GAP_MIN = 100;
 export const PEG_GAP_MAX = 130;
 /** How many pegs to keep above the one you hold. This layout stops at two total. */
 export const PEGS_AHEAD = 1;
-/** Peg art is 129×123, drawn at this width. Same size as the on-screen rivet. */
-export const PEG_DRAW_W = 52;
-export const PEG_DRAW_H = PEG_DRAW_W * (123 / 129);
 /**
  * Foot-sprite center below the body center when the legs hang straight.
  * Face art is 242×223. The ankles sit on face pixel row 208.
@@ -125,11 +122,8 @@ const HEAD_H = HEAD_W * (FACE_H / FACE_W);
 export const LEG_DROP = (208 / FACE_H - 0.5) * HEAD_H;
 /** Start rivet sits on the hanging monkey's feet. */
 export const PEG_LOWER_Y = feelDefaults.restDrop + LEG_DROP;
-/**
- * Upper rivet keeps the old spacing above a peg at y = 0, then moves
- * up by three rivet heights. +y is down, so the upper peg has the smaller y.
- */
-export const PEG_UPPER_GAP = PEG_LOWER_Y + 294 + PEG_DRAW_H * 3;
+/** Center distance from the start rivet up to the next one. +y is down. */
+export const PEG_UPPER_GAP = 600;
 /** How often a peg above the start row is red. */
 export const RED_PEG_CHANCE = 0.18;
 /** Seconds before a blue or red peg turns gray and cannot be grabbed. */

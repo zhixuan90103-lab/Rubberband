@@ -86,6 +86,8 @@ export type SlingWorld = {
   flash: number;
   /** Seconds since the peg impact. Negative means no impact pose. */
   squash: number;
+  /** Increments once each time a flight grab lands. The view plays the burst. */
+  grabPulse: number;
   /** The finger is past the arm cap, and the wall did not stop it short. */
   fullPull: boolean;
   /** Camera world y. Visible design y is world y minus this. */
@@ -354,6 +356,7 @@ export function createWorld(rng: Rng): SlingWorld {
     pullY: 0,
     flash: 0,
     squash: -1,
+    grabPulse: 0,
     fullPull: false,
     cameraY: origin.y + feel.restDrop - anchorY(),
     cameraX: 0,
@@ -486,6 +489,7 @@ function grab(world: SlingWorld, peg: Peg): void {
   world.phase = 'hang';
   world.heldId = peg.id;
   world.squash = 0;
+  world.grabPulse += 1;
   world.pullX = 0;
   world.pullY = 0;
   if (reach < 1) {
