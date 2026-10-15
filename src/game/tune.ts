@@ -210,7 +210,11 @@ export const PEG_SINGLE_X1 = 270;
  * and one jump below the screen. Worst case is a pair every
  * PEG_JUMP_MIN, so the pool is that count plus spare slots.
  */
-export const PEG_FILL_LEAD = 80;
+/**
+ * Fill this far above the view. Half a max jump plus a coin,
+ * so the coin in that new gap is already above the screen.
+ */
+export const PEG_FILL_LEAD = PEG_JUMP_MAX / 2 + 80;
 /** One max jump below the screen, so a downward shot still has its target. */
 export const PEG_KEEP_BELOW = PEG_JUMP_MAX;
 export const PEG_POOL = 24;

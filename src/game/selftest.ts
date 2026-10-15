@@ -1,5 +1,5 @@
 import { freshRowMemory, mulberry32, pegBand, pegInView, PEG_PARK_Y, planNextRow, releasePeg, type PegSpot } from './pegs';
-import { initPhysics } from './sim';
+import { initPhysics, simWrite } from './sim';
 import { beginEnter, cancelDrag, createWorld, dragTo, endDrag, pointerToWorld, readAim, stepWorld, tryBeginDrag } from './sling';
 import { DESIGN_HEIGHT } from '../adapt/design';
 import { AIM_EXTRA, armMax, armSlack, BLUE_PEG_LIFE, BODY_RADIUS, feel, PEG_JUMP_MAX, PEG_JUMP_MIN, PEG_LOWER_Y, PEG_OPEN_SINGLE_GAP, PEG_POOL, SHAFT_CENTER, SHAFT_LEFT, SHAFT_RIGHT } from './tune';
@@ -474,6 +474,50 @@ for (let index = 1; index < 40; index += 1) {
   rowMemory = plan.memory;
   rowY = Math.min(...plan.spots.map((spot) => spot.y));
   previous = plan.spots;
+}
+
+const purse = createWorld(mulberry32(21));
+for (const coin of purse.coins) coin.live = false;
+const beforeTop = Math.min(...purse.pegs.filter((peg) => peg.live).map((peg) => peg.y));
+purse.jumpsUntilCoin = 1;
+purse.phase = 'fall';
+purse.cameraY = beforeTop - 900;
+stepWorld(purse, 1 / 60);
+const spawned = purse.coins.find((coin) => coin.live);
+if (!spawned) throw new Error('a row plants its coin before anyone flies there');
+assert(spawned.y < beforeTop, 'the coin sits above the rows that were already there');
+assert(purse.jumpsUntilCoin >= 1 && purse.jumpsUntilCoin <= 5, 'the gap rolls again');
+const gapBefore = purse.jumpsUntilCoin;
+purse.phase = 'fly';
+purse.leftId = -1;
+purse.leftCleared = true;
+purse.leftLock = 0;
+const caught = purse.pegs.find((peg) => peg.live && peg.y < beforeTop);
+if (!caught) throw new Error('a new peg to catch is missing');
+purse.body.x = caught.x;
+purse.body.y = caught.y;
+purse.body.vy = -80;
+simWrite(purse.sim, purse.body.x, purse.body.y, 0, -80);
+stepWorld(purse, 1 / 60);
+assert(purse.jumpsUntilCoin === gapBefore, 'catching does not plant a coin');
+purse.phase = 'fly';
+purse.body.x = spawned.x;
+purse.body.y = spawned.y;
+purse.body.vy = -200;
+simWrite(purse.sim, purse.body.x, purse.body.y, 0, -200);
+stepWorld(purse, 1 / 60);
+assert(purse.coinsGot === 1 && spawned.taken, 'an upward flight picks the coin up');
+
+const climb = createWorld(mulberry32(4));
+climb.phase = 'fall';
+for (let i = 0; i < 800; i += 1) {
+  const wasLive = climb.coins.map((coin) => coin.live);
+  climb.cameraY -= 8;
+  stepWorld(climb, 1 / 60);
+  climb.coins.forEach((coin, index) => {
+    if (!coin.live || wasLive[index]) return;
+    assert(coin.y < climb.cameraY, 'a coin is planted above the view, before the camera reaches it');
+  });
 }
 
 console.log('sling self-test ok');

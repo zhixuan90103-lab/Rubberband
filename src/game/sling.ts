@@ -9,6 +9,7 @@
  */
 
 /** Radians per second added for each px/s of velocity change in a wall hit. */
+import { createCoinPool, nextCoinGap, placeCoin, tickCoins, type Coin } from './coins';
 import {
   beginPegCooldown,
   claimPeg,
@@ -130,6 +131,10 @@ export type SlingWorld = {
   cameraVel: number;
   cameraVelX: number;
   height: number;
+  coins: Coin[];
+  /** Rows left before the next coin is planted with a row. */
+  jumpsUntilCoin: number;
+  coinsGot: number;
   rng: Rng;
   sim: Sim;
   catch: Catch | null;
@@ -178,6 +183,8 @@ function pegReserved(world: SlingWorld, peg: Peg): boolean {
 
 /** Move free slots onto the next row. The pool size never changes. */
 function placeNextRow(world: SlingWorld): boolean {
+  const seeding = world.rowMemory.stage === 'start';
+  const fromY = world.rowY;
   const plan = planNextRow(world.rowY, world.rng, world.rowMemory);
   const spots = plan.spots;
   const claimed: Peg[] = [];
@@ -198,8 +205,18 @@ function placeNextRow(world: SlingWorld): boolean {
     peg.age = 0;
     peg.cool = 0;
   }
-  world.rowY = Math.min(...spots.map((spot) => spot.y));
+  const rowY = Math.min(...spots.map((spot) => spot.y));
+  world.rowY = rowY;
   world.rowMemory = plan.memory;
+  if (!seeding) {
+    world.jumpsUntilCoin -= 1;
+    if (world.jumpsUntilCoin <= 0) {
+      const x = spots.reduce((sum, spot) => sum + spot.x, 0) / spots.length;
+      const placed = placeCoin(world.coins, x, (fromY + rowY) / 2, 0);
+      // Gap comes from the row itself, so the peg random stream stays put.
+      world.jumpsUntilCoin = placed ? 3 + (Math.abs(Math.round(x)) % 3) : 1;
+    }
+  }
   return true;
 }
 
@@ -458,6 +475,9 @@ export function createWorld(rng: Rng): SlingWorld {
     cameraVel: 0,
     cameraVelX: 0,
     height: 0,
+    coins: createCoinPool(),
+    jumpsUntilCoin: nextCoinGap(rng),
+    coinsGot: 0,
     rng,
     sim: createSim(0, 0),
   };
@@ -1010,6 +1030,15 @@ function tickPegs(world: SlingWorld, dt: number): void {
 }
 
 export function stepWorld(world: SlingWorld, dt: number): void {
+  world.coinsGot += tickCoins(
+    world.coins,
+    dt,
+    world.phase,
+    world.body.x,
+    world.body.y,
+    world.body.vy,
+    world.cameraY,
+  );
   tickPegs(world, dt);
   dropSpentHold(world);
   world.flash = Math.max(0, world.flash - dt);

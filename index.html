@@ -24,9 +24,12 @@
           <div id="stage" aria-label="game-stage">
             <div id="ui-root">
               <header>
-                <p class="eyebrow">Sling</p>
-                <h1>拉一颗钉</h1>
-                <p id="status" class="status">booting…</p>
+                <div id="coin-hud" class="coin-hud">
+                  <span class="coin-hud-icon" aria-hidden="true">
+                    <span class="coin-hud-flash"></span>
+                  </span>
+                  <span id="coin-count" class="coin-hud-count">0</span>
+                </div>
               </header>
             </div>
           </div>

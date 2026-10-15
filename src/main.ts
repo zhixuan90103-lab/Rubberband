@@ -20,6 +20,7 @@ import {
 } from './adapt/devicePreview';
 import { applyNativeClass, applySafeAreaCssVars } from './adapt/safeArea';
 import { createRenderer } from './create-renderer';
+import { COIN_FLY, COIN_POOL } from './game/coins';
 import { mulberry32, pegSpent, pegUrgency, pegWarn } from './game/pegs';
 import { initPhysics } from './game/sim';
 import {
@@ -61,15 +62,29 @@ import pegRedUrl from './assets/art/01-pink-ring.png';
 import pegGreenUrl from './assets/art/10-green-rivet.png';
 import pegGrayUrl from './assets/art/11-gray-rivet.png';
 import pegFlashUrl from './assets/art/12-peg-flash.png';
+import coinUrl from './assets/art/14-coin-sheet.png';
 import wallUrl from './assets/art/09-wall-slice.png';
 
 const stage = document.getElementById('stage')!;
 const shell = document.getElementById('shell')!;
 const viewportEl = document.getElementById('viewport')!;
-const statusEl = document.getElementById('status');
+const coinCountEl = document.getElementById('coin-count');
+let shownCoins = -1;
 
-function setStatus(text: string): void {
-  if (statusEl) statusEl.textContent = text;
+function setCoinCount(count: number): void {
+  if (!coinCountEl || count === shownCoins) return;
+  const gained = shownCoins >= 0 && count > shownCoins;
+  shownCoins = count;
+  coinCountEl.textContent = String(count);
+  if (gained) punchCoinHud();
+}
+
+function punchCoinHud(): void {
+  const icon = document.querySelector('.coin-hud-icon');
+  if (!icon) return;
+  icon.classList.remove('hit');
+  void (icon as HTMLElement).offsetWidth;
+  icon.classList.add('hit');
 }
 
 function mountDeathScreen(root: HTMLElement, onRetry: () => void): { setOpen: (open: boolean) => void } {
@@ -691,8 +706,10 @@ function makeArms(): THREE.Mesh {
   return arms;
 }
 
-function loadSpriteMap(url: string): THREE.Texture {
-  const map = new THREE.TextureLoader().load(url);
+function loadSpriteMap(url: string, onLoad?: (tex: THREE.Texture) => void): THREE.Texture {
+  const map = new THREE.TextureLoader().load(url, (tex) => {
+    onLoad?.(tex);
+  });
   map.colorSpace = THREE.SRGBColorSpace;
   map.flipY = false;
   map.premultiplyAlpha = true;
@@ -739,6 +756,72 @@ function makePegPlateMap(): THREE.DataTexture {
 }
 
 const pegPlateMap = makePegPlateMap();
+
+/**
+ * Transparent stack, low to high:
+ * peg plate -1, arm 0, body 2, foot 3, rivet 4, coin 5, flash 8.
+ * The sheet is bound at material creation, like the rivet. This WebGPU
+ * path does not pick up a map assigned later, and it ignores repeat/offset.
+ * Each frame is a UV crop of that one texture.
+ */
+const COIN_SPIN = [0, 1, 2, 5, 4, 3, 6, 7, 8];
+/** Screen position where a collected coin started its flight, one slot per pool entry. */
+const coinFlights: ({ sx: number; sy: number } | null)[] = Array.from({ length: COIN_POOL }, () => null);
+/** Visible width relative to the face-on cell, one value per sheet frame. */
+const COIN_SHADOW_X = [1, 0.98, 0.83, 0.56, 0.24, 0.56, 0.83, 0.98, 1];
+const COIN_W = 45;
+const coinSheet = loadSpriteMap(coinUrl);
+const coinFrames = Array.from({ length: 9 }, (_, index) => {
+  const geo = new THREE.PlaneGeometry(COIN_W, COIN_W);
+  const uv = geo.attributes.uv;
+  const col = index % 3;
+  const row = Math.floor(index / 3);
+  for (let i = 0; i < uv.count; i += 1) {
+    uv.setXY(i, (col + uv.getX(i)) / 3, (row + uv.getY(i)) / 3);
+  }
+  return geo;
+});
+
+/** Coin icon center and width in design pixels. The stage CSS scale is divided out. */
+function coinHudDesign(): { x: number; y: number; size: number } | null {
+  const icon = document.querySelector('.coin-hud-icon');
+  if (!icon) return null;
+  const stageRect = stage.getBoundingClientRect();
+  const iconRect = icon.getBoundingClientRect();
+  if (stageRect.width <= 0 || stageRect.height <= 0) return null;
+  const x = ((iconRect.left + iconRect.width / 2 - stageRect.left) / stageRect.width) * DESIGN_WIDTH;
+  const y = ((iconRect.top + iconRect.height / 2 - stageRect.top) / stageRect.height) * DESIGN_HEIGHT;
+  const size = (iconRect.width / stageRect.width) * DESIGN_WIDTH;
+  return { x, y, size };
+}
+
+function makeCoinView(): { root: THREE.Group; mesh: THREE.Mesh; shadow: THREE.Mesh } {
+  const root = new THREE.Group();
+  root.frustumCulled = false;
+  root.visible = false;
+  // Monkey contact blob: 88% of the sprite, solid core 0.8, shifted down-right.
+  // Opacity is lower than the monkey (0.32). Width tracks the spinning frame.
+  const shadow = makeShadow(COIN_W * 0.88, COIN_W * 0.88, 0.8, 0.32);
+  shadow.frustumCulled = false;
+  shadow.position.set(COIN_W * 0.12, COIN_W * 0.17, 0);
+  const mesh = new THREE.Mesh(
+    coinFrames[0],
+    new THREE.MeshBasicMaterial({
+      map: coinSheet,
+      transparent: true,
+      premultipliedAlpha: true,
+      depthWrite: false,
+      depthTest: false,
+      toneMapped: false,
+      side: THREE.DoubleSide,
+    }),
+  );
+  mesh.frustumCulled = false;
+  mesh.renderOrder = 5;
+  mesh.position.z = 1;
+  root.add(shadow, mesh);
+  return { root, mesh, shadow };
+}
 
 /**
  * One screen-sized plane. The art is 1179×1071 and tiles on the vertical seam.
@@ -1178,6 +1261,7 @@ function syncView(
   grabSeen: { n: number },
   aimLine: THREE.Line,
   wallRing: THREE.Mesh,
+  coinViews: { root: THREE.Group; mesh: THREE.Mesh; shadow: THREE.Mesh }[],
 ): void {
   if (world.phase === 'fall') {
     if (!deathWasFall) deathShake = 0;
@@ -1469,6 +1553,77 @@ function syncView(
     view.ring.scale.setScalar(0.72 + u * 1.9);
   }
   grabSeen.n = world.grabPulse;
+
+  for (let i = 0; i < world.coins.length; i += 1) {
+    const coin = world.coins[i];
+    const view = coinViews[i];
+    if (!view) continue;
+    if (!coin.live) {
+      coinFlights[i] = null;
+      view.root.visible = false;
+      continue;
+    }
+    const frame = COIN_SPIN[Math.floor(coin.spin) % COIN_SPIN.length] ?? 0;
+    const geo = coinFrames[frame];
+    if (geo && view.mesh.geometry !== geo) view.mesh.geometry = geo;
+    const slim = COIN_SHADOW_X[frame] ?? 1;
+    view.shadow.scale.set(slim, 1, 1);
+    view.shadow.position.x = COIN_W * 0.12 * slim;
+    view.root.visible = true;
+    (view.mesh.material as THREE.MeshBasicMaterial).opacity = 1;
+    (view.shadow.material as THREE.MeshBasicMaterial).opacity = 1;
+    if (!coin.taken) {
+      coinFlights[i] = null;
+      view.root.position.set(coin.x, coin.y, 0);
+      view.root.scale.setScalar(1);
+      continue;
+    }
+    let flight = coinFlights[i];
+    if (!flight) {
+      flight = { sx: coin.x - camera.position.x, sy: coin.y - camera.position.y };
+      coinFlights[i] = flight;
+    }
+    const hud = coinHudDesign();
+    const endX = hud?.x ?? 40;
+    const endY = hud?.y ?? 36;
+    // Face-on gold fills 425/517 of the cell. Match that width to the HUD icon box.
+    const endScale = (hud?.size ?? 36) / (COIN_W * (425 / 517));
+    const t = Math.min(1, coin.pop / COIN_FLY);
+    // Ease-in: the coin lingers, then rushes into the counter.
+    const s = t * t;
+    const dx = endX - flight.sx;
+    const dy = endY - flight.sy;
+    const len = Math.hypot(dx, dy) || 1;
+    const bow = Math.min(150, Math.max(72, len * 0.42));
+    // Bend toward the middle of the screen so the path is an arc, not a chord.
+    let px = -dy / len;
+    let py = dx / len;
+    const midX = (flight.sx + endX) / 2;
+    const midY = (flight.sy + endY) / 2;
+    if ((DESIGN_WIDTH / 2 - midX) * px + (DESIGN_HEIGHT / 2 - midY) * py < 0) {
+      px = -px;
+      py = -py;
+    }
+    const cx = midX + px * bow;
+    const cy = midY + py * bow;
+    const o = 1 - s;
+    const screenX = o * o * flight.sx + 2 * o * s * cx + s * s * endX;
+    const screenY = o * o * flight.sy + 2 * o * s * cy + s * s * endY;
+    view.root.position.set(camera.position.x + screenX, camera.position.y + screenY, 0);
+    // Swell is smaller, and it finishes before the flight ends. The slot is
+    // freed on the tick that reaches t = 1, so the last drawn frames must
+    // already be exactly the HUD icon size.
+    const u = Math.min(1, t / 0.72);
+    const scale = (1 - u) + u * endScale + Math.sin(Math.PI * u) * 0.2;
+    view.root.scale.setScalar(scale);
+    if (u === 1) {
+      const face = coinFrames[0];
+      if (face) view.mesh.geometry = face;
+      view.shadow.scale.set(1, 1, 1);
+      view.shadow.position.x = COIN_W * 0.12;
+    }
+    (view.shadow.material as THREE.MeshBasicMaterial).opacity = 1 - t;
+  }
 }
 
 async function boot(): Promise<void> {
@@ -1495,7 +1650,6 @@ async function boot(): Promise<void> {
   if (ui) mountTunePanel(ui);
   applyNativeClass();
   const native = Capacitor.isNativePlatform();
-  const platform = Capacitor.getPlatform();
 
   await initPhysics();
   world = createWorld(mulberry32(seed));
@@ -1504,6 +1658,11 @@ async function boot(): Promise<void> {
 
   const { scene, camera, actor, eyes, feet, actorShadow, arms, flash, center, pegRoot, backdrop, jungle, aimLine, wallRing } = bootScene();
   const pegViews = createPegViewPool(pegRoot);
+  const coinViews = Array.from({ length: COIN_POOL }, () => {
+    const view = makeCoinView();
+    scene.add(view.root);
+    return view;
+  });
 
   let layout: StageLayout | null = null;
 
@@ -1622,17 +1781,13 @@ async function boot(): Promise<void> {
       grabSeen,
       aimLine,
       wallRing,
+      coinViews,
     );
-    const pull = Math.round(pullLength(world));
-    setStatus(
-      `${platform}${native ? ' · native' : ''}\n` +
-        `${world.phase} · height ${Math.round(world.height)} · pull ${pull}` +
-        (world.phase === 'drag'
-          ? pull < feel.minPull
-            ? ` · under ${feel.minPull}`
-            : ` · shot ${Math.min(pull, feel.maxPull)}`
-          : ''),
-    );
+    let flyingCoins = 0;
+    for (const coin of world.coins) {
+      if (coin.live && coin.taken) flyingCoins += 1;
+    }
+    setCoinCount(world.coinsGot - flyingCoins);
     renderer.render(scene, camera);
   });
 
@@ -1651,5 +1806,4 @@ async function boot(): Promise<void> {
 
 boot().catch((err) => {
   console.error(err);
-  setStatus(`boot failed: ${err instanceof Error ? err.message : String(err)}`);
 });

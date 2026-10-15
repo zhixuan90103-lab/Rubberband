@@ -154,6 +154,66 @@ header {
   z-index: 1;
 }
 
+.coin-hud {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 40px;
+  padding: 2px 28px 2px 2px;
+  border-radius: 999px;
+  background: rgba(28, 18, 10, 0.4);
+}
+
+.coin-hud-icon {
+  position: relative;
+  width: 32.4px;
+  height: 32.4px;
+  background-image: url('./assets/art/14-coin-sheet.png');
+  background-repeat: no-repeat;
+  /* Frame 0 is the top-left cell. Crop its transparent margin so the gold fills the box. */
+  background-size: 117.9px 117.9px;
+  background-position: -3.6px -3.6px;
+}
+
+.coin-hud-icon.hit {
+  animation: coin-hud-pop 0.32s ease-out;
+}
+
+.coin-hud-flash {
+  position: absolute;
+  inset: 0;
+  background-image: url('./assets/art/14-coin-sheet.png');
+  background-repeat: no-repeat;
+  background-size: 117.9px 117.9px;
+  background-position: -3.6px -3.6px;
+  mix-blend-mode: plus-lighter;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.coin-hud-icon.hit .coin-hud-flash {
+  animation: coin-hud-add 0.32s ease-out;
+}
+
+@keyframes coin-hud-pop {
+  0% { transform: scale(1); }
+  32% { transform: scale(1.38); }
+  100% { transform: scale(1); }
+}
+
+@keyframes coin-hud-add {
+  0% { opacity: 0.95; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.85); }
+}
+
+.coin-hud-count {
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  color: #fff6df;
+}
+
 #death-screen {
   pointer-events: auto;
   position: absolute;
@@ -302,15 +362,6 @@ header h1 {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   opacity: 0.65;
-  color: #e2e8f0;
-}
-
-.status {
-  margin: 8px 0 0;
-  font-size: 12px;
-  line-height: 1.4;
-  opacity: 0.85;
-  white-space: pre-wrap;
   color: #e2e8f0;
 }
 

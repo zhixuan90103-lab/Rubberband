@@ -27,7 +27,8 @@
 | 音效方案（未实现） | `docs/AUDIO.md` |
 | 现行物理和默认数 | `src/game/tune.ts` · `docs/PHYSICS-PLAN.md` |
 | 调参面板 | `src/game/tunePanel.ts` |
-| 发射、抓住、转角 | `src/game/sling.ts` · `docs/PHYSICS-PLAN.md` |
+| 发射、抓住、转角、钉场 | `src/game/sling.ts` · `src/game/pegs.ts` · `docs/PHYSICS-PLAN.md` |
+| 金币 | `src/game/coins.ts` · `docs/PHYSICS-PLAN.md`「金币」 |
 | 拉射做了什么 | `docs/MVP-PLAN.md` · `src/game/sling.ts` |
 | 物理分工 | `docs/PHYSICS-PLAN.md` |
 
@@ -74,6 +75,6 @@ npm run ios
 
 ## 刻意不做
 
-- 溶解、移动钉、额外障碍、金币、音效（见 `docs/MVP-PLAN.md`）。左右墙的反弹已经有了 |  
+- 溶解、移动钉、额外障碍、音效（见 `docs/MVP-PLAN.md`）。左右墙的反弹和金币已经有了。 |  
 - Android（可后加）  
 - WebGL 静默回退  
