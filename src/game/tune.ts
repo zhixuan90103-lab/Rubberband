@@ -110,8 +110,8 @@ export const hapticDefaults: HapticFeel = {
   grainI: 0.3,
   grainS: 0,
   grainHz: 35,
-  grabI: 0.49,
-  grabS: 0.3,
+  grabI: 0.4,
+  grabS: 0.26,
   grabTailI: 0,
   grabTailS: 0,
   grabTailMs: 0,
@@ -121,10 +121,10 @@ export const hapticDefaults: HapticFeel = {
   reboundDamp: 6,
   reboundDampEnergy: 3,
   reboundS: 0.11,
-  reboundSDrop: 0.47,
+  reboundSDrop: 0.39,
   reboundFloor: 0.25,
   reboundTailMs: 40,
-  reboundTailI: 0.41,
+  reboundTailI: 0.34,
   reboundTailS: 0.1,
   wallMul: 0.8,
   wallS: 0.1,
@@ -205,10 +205,15 @@ export const PEG_GAP_MAX = 460;
 /** A single sits somewhere in this band, not on a fixed center step. */
 export const PEG_SINGLE_X0 = 120;
 export const PEG_SINGLE_X1 = 270;
-/** Fixed peg slots. Rows reuse a slot instead of allocating another peg. */
-export const PEG_POOL = 18;
-/** Recycle a peg once it is this many screen heights away from the body. */
-export const PEG_RECYCLE_SCREENS = 1.5;
+/**
+ * Live pegs are the camera window plus one jump above the fill line
+ * and one jump below the screen. Worst case is a pair every
+ * PEG_JUMP_MIN, so the pool is that count plus spare slots.
+ */
+export const PEG_FILL_LEAD = 80;
+/** One max jump below the screen, so a downward shot still has its target. */
+export const PEG_KEEP_BELOW = PEG_JUMP_MAX;
+export const PEG_POOL = 24;
 /**
  * Foot-sprite center below the body center when the legs hang straight.
  * Face art is 242×223. The ankles sit on face pixel row 208.

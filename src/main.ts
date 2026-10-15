@@ -42,12 +42,15 @@ import {
   BODY_RADIUS,
   DRAG_BLOCK_Y,
   guides,
+  PEG_LOWER_Y,
+  PEG_POOL,
   SHAFT_LEFT,
   SHAFT_RIGHT,
   armMax,
   feel,
 } from './game/tune';
 import bgUrl from './assets/bg-jungle.png';
+import titleUrl from './assets/art/13-title.png';
 import eyesUrl from './assets/art/04-two-slots.png';
 import faceUrl from './assets/art/05-monkey-face.png';
 import footUrl from './assets/art/07-dark-oval.png';
@@ -101,6 +104,7 @@ function makeOrtho(): THREE.OrthographicCamera {
 
 type PegView = {
   group: THREE.Group;
+  plate: THREE.Mesh;
   back: THREE.Mesh;
   blue: THREE.Mesh;
   red: THREE.Mesh;
@@ -163,6 +167,7 @@ function bootScene(): {
   const backdrop = new THREE.Group();
   const jungle = mountJungle(backdrop);
   scene.add(backdrop);
+  scene.add(mountTitle());
 
   const pegRoot = new THREE.Group();
   scene.add(pegRoot);
@@ -686,7 +691,7 @@ function makeArms(): THREE.Mesh {
   return arms;
 }
 
-function artSprite(url: string, width: number, height: number): THREE.Mesh {
+function loadSpriteMap(url: string): THREE.Texture {
   const map = new THREE.TextureLoader().load(url);
   map.colorSpace = THREE.SRGBColorSpace;
   map.flipY = false;
@@ -694,6 +699,14 @@ function artSprite(url: string, width: number, height: number): THREE.Mesh {
   map.generateMipmaps = false;
   map.magFilter = THREE.LinearFilter;
   map.minFilter = THREE.LinearFilter;
+  return map;
+}
+
+function artSprite(url: string, width: number, height: number): THREE.Mesh {
+  return spriteFromMap(loadSpriteMap(url), width, height);
+}
+
+function spriteFromMap(map: THREE.Texture, width: number, height: number): THREE.Mesh {
   return new THREE.Mesh(
     new THREE.PlaneGeometry(width, height),
     new THREE.MeshBasicMaterial({
@@ -707,6 +720,26 @@ function artSprite(url: string, width: number, height: number): THREE.Mesh {
   );
 }
 
+const pegMaps = {
+  back: loadSpriteMap(pegBackUrl),
+  blue: loadSpriteMap(pegBlueUrl),
+  red: loadSpriteMap(pegRedUrl),
+  green: loadSpriteMap(pegGreenUrl),
+  gray: loadSpriteMap(pegGrayUrl),
+  flash: loadSpriteMap(pegFlashUrl),
+};
+
+function makePegPlateMap(): THREE.DataTexture {
+  const data = new Uint8Array([44, 33, 24, 255]);
+  const map = new THREE.DataTexture(data, 1, 1);
+  map.needsUpdate = true;
+  map.colorSpace = THREE.SRGBColorSpace;
+  map.premultiplyAlpha = true;
+  return map;
+}
+
+const pegPlateMap = makePegPlateMap();
+
 /**
  * One screen-sized plane. The art is 1179×1071 and tiles on the vertical seam.
  * Width fills the design stage; one copy is DESIGN_WIDTH * (h/w) world pixels tall.
@@ -715,6 +748,18 @@ function artSprite(url: string, width: number, height: number): THREE.Mesh {
  */
 /** Uniform scale so a sideways camera shift does not show a gap at the edge. */
 const BG_SCALE = 1.24;
+
+/** Title sits on the backdrop above the birth peg. Source art is 800×437. */
+const TITLE_W = 360;
+const TITLE_H = TITLE_W * (437 / 800);
+
+function mountTitle(): THREE.Mesh {
+  const title = artSprite(titleUrl, TITLE_W, TITLE_H);
+  title.renderOrder = -2;
+  // Bottom edge sits a little below the birth peg. +y is down.
+  title.position.set(DESIGN_WIDTH / 2, PEG_LOWER_Y - TITLE_H / 2 + 36, -0.9);
+  return title;
+}
 
 function mountJungle(backdrop: THREE.Group): THREE.Texture {
   const jungle = new THREE.TextureLoader().load(bgUrl, (tex) => {
@@ -1012,40 +1057,46 @@ function burstMaterial(map: THREE.Texture | null): THREE.MeshBasicMaterial {
 
 function makePegView(): PegView {
   const group = new THREE.Group();
+  group.frustumCulled = false;
   const shadow = makeShadow(PEG_W * 1.25, PEG_W * 0.88, 0.3, 0.65);
-  // Above the back plate (renderOrder -1), under the red and blue caps (renderOrder 3).
+  shadow.frustumCulled = false;
   // Local +x is the long axis. +y is down, so this aims down-right, away from the peg.
   shadow.renderOrder = 1;
   shadow.rotation.z = Math.atan2(PEG_H, PEG_W);
   shadow.position.set(PEG_W * 0.38, PEG_H * 0.38, 0.2);
-  const back = artSprite(pegBackUrl, PEG_W, PEG_H);
+  // Plate then arm (renderOrder 0) then the colored rivet.
+  const plate = new THREE.Mesh(
+    new THREE.CircleGeometry(PEG_W * 0.48, 24),
+    new THREE.MeshBasicMaterial({
+      map: pegPlateMap,
+      transparent: true,
+      premultipliedAlpha: true,
+      toneMapped: false,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
+  );
+  plate.frustumCulled = false;
+  plate.renderOrder = -1;
+  plate.position.z = -0.5;
+  const back = spriteFromMap(pegMaps.back, PEG_W, PEG_H);
+  back.frustumCulled = false;
   back.renderOrder = -1;
   back.position.z = -0.4;
-  const blue = artSprite(pegBlueUrl, PEG_W, PEG_H);
-  const red = artSprite(pegRedUrl, PEG_W, PEG_H);
-  const green = artSprite(pegGreenUrl, PEG_W, PEG_H);
-  const gray = artSprite(pegGrayUrl, PEG_W, PEG_H);
-  blue.renderOrder = 3;
-  red.renderOrder = 3;
-  green.renderOrder = 3;
-  gray.renderOrder = 3;
-  blue.position.z = 0.8;
-  red.position.z = 0.8;
-  green.position.z = 0.8;
-  gray.position.z = 0.8;
+  const blue = spriteFromMap(pegMaps.blue, PEG_W, PEG_H);
+  const red = spriteFromMap(pegMaps.red, PEG_W, PEG_H);
+  const green = spriteFromMap(pegMaps.green, PEG_W, PEG_H);
+  const gray = spriteFromMap(pegMaps.gray, PEG_W, PEG_H);
+  for (const cap of [blue, red, green, gray]) {
+    cap.frustumCulled = false;
+    cap.renderOrder = 4;
+    cap.position.z = 0.8;
+  }
   red.visible = false;
   green.visible = false;
   gray.visible = false;
-  // Same 129×123 frame as the rivet. WebGPU adds when premultipliedAlpha is on.
-  const flashMap = new THREE.TextureLoader().load(pegFlashUrl);
-  flashMap.colorSpace = THREE.SRGBColorSpace;
-  flashMap.flipY = false;
-  flashMap.premultiplyAlpha = true;
-  flashMap.generateMipmaps = false;
-  flashMap.magFilter = THREE.LinearFilter;
-  flashMap.minFilter = THREE.LinearFilter;
   const flashMat = new THREE.MeshBasicMaterial({
-    map: flashMap,
+    map: pegMaps.flash,
     transparent: true,
     premultipliedAlpha: true,
     blending: THREE.AdditiveBlending,
@@ -1056,11 +1107,13 @@ function makePegView(): PegView {
     opacity: 1,
   });
   const flash = new THREE.Mesh(new THREE.PlaneGeometry(PEG_W, PEG_H), flashMat);
+  flash.frustumCulled = false;
   flash.renderOrder = 8;
   flash.position.z = 1.2;
   flash.scale.setScalar(1);
   flash.visible = false;
   const ring = new THREE.Mesh(new THREE.PlaneGeometry(PEG_W * 1.15, PEG_W * 1.15), burstMaterial(pegRing));
+  ring.frustumCulled = false;
   ring.renderOrder = 9;
   ring.position.z = 1.4;
   ring.visible = false;
@@ -1076,10 +1129,36 @@ function makePegView(): PegView {
       side: THREE.DoubleSide,
     }),
   );
+  grab.frustumCulled = false;
   grab.renderOrder = 6;
   grab.position.z = 0.6;
-  group.add(shadow, back, blue, red, green, gray, flash, ring, grab);
-  return { group, back, blue, red, green, gray, flash, ring, grab, blink: 0, burst: -1 };
+  group.add(shadow, plate, back, blue, red, green, gray, flash, ring, grab);
+  return { group, plate, back, blue, red, green, gray, flash, ring, grab, blink: 0, burst: -1 };
+}
+
+function parkPegView(view: PegView): void {
+  view.group.visible = false;
+  view.group.position.set(0, 0, 0);
+  view.burst = -1;
+  view.blink = 0;
+  view.flash.visible = false;
+  view.ring.visible = false;
+  view.grab.visible = false;
+  (view.flash.material as THREE.MeshBasicMaterial).opacity = 0;
+  for (const cap of [view.blue, view.red, view.green, view.gray, view.back]) {
+    (cap.material as THREE.MeshBasicMaterial).color.setRGB(1, 1, 1);
+  }
+}
+
+function createPegViewPool(root: THREE.Group): PegView[] {
+  const views: PegView[] = [];
+  for (let i = 0; i < PEG_POOL; i += 1) {
+    const view = makePegView();
+    parkPegView(view);
+    root.add(view.group);
+    views.push(view);
+  }
+  return views;
 }
 
 function syncView(
@@ -1093,8 +1172,7 @@ function syncView(
   arms: THREE.Mesh,
   flash: THREE.Mesh,
   center: THREE.Mesh,
-  pegRoot: THREE.Group,
-  pegViews: Map<number, PegView>,
+  pegViews: PegView[],
   backdrop: THREE.Group,
   jungle: THREE.Texture,
   grabSeen: { n: number },
@@ -1307,14 +1385,13 @@ function syncView(
   }
 
   for (const peg of world.pegs) {
-    let view = pegViews.get(peg.id);
-    if (!view) {
-      view = makePegView();
-      pegRoot.add(view.group);
-      pegViews.set(peg.id, view);
+    const view = pegViews[peg.id - 1];
+    if (!view) continue;
+    if (!peg.live) {
+      parkPegView(view);
+      continue;
     }
-    view.group.visible = peg.live;
-    if (!peg.live) continue;
+    view.group.visible = true;
     view.group.position.set(peg.x, peg.y, 0);
     const assisted =
       (dragAim && peg.id === dragAim.pegId) ||
@@ -1331,6 +1408,7 @@ function syncView(
     }
     const spent = pegSpent(peg);
     const green = peg.kind === 'green';
+    view.plate.visible = true;
     view.back.visible = true;
     view.gray.visible = spent;
     view.green.visible = !spent && green;
@@ -1425,7 +1503,7 @@ async function boot(): Promise<void> {
   renderer.domElement.style.pointerEvents = 'auto';
 
   const { scene, camera, actor, eyes, feet, actorShadow, arms, flash, center, pegRoot, backdrop, jungle, aimLine, wallRing } = bootScene();
-  const pegViews = new Map<number, PegView>();
+  const pegViews = createPegViewPool(pegRoot);
 
   let layout: StageLayout | null = null;
 
@@ -1538,7 +1616,6 @@ async function boot(): Promise<void> {
       arms,
       flash,
       center,
-      pegRoot,
       pegViews,
       backdrop,
       jungle,

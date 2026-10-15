@@ -5,14 +5,16 @@
  * Slots come from a fixed pool and are moved, not constructed again.
  */
 
-import { DESIGN_WIDTH } from '../adapt/design';
+import { DESIGN_HEIGHT, DESIGN_WIDTH } from '../adapt/design';
 import {
   BLUE_PEG_LIFE,
+  PEG_FILL_LEAD,
   PEG_GAP_MAX,
   PEG_GAP_MIN,
   PEG_JUMP_MAX,
   PEG_JUMP_MIN,
   PEG_INVALID,
+  PEG_KEEP_BELOW,
   PEG_LANES,
   PEG_LOWER_Y,
   PEG_OPEN_SINGLE_GAP,
@@ -60,6 +62,9 @@ export function createPegPool(): Peg[] {
   return pegs;
 }
 
+/** Idle slots sit here so a stale draw cannot land on the camera. */
+export const PEG_PARK_Y = 1e6;
+
 export function claimPeg(pegs: Peg[]): Peg | null {
   const peg = pegs.find((item) => !item.live);
   if (!peg) return null;
@@ -73,38 +78,76 @@ export function releasePeg(peg: Peg): void {
   peg.live = false;
   peg.age = 0;
   peg.cool = 0;
+  peg.x = 0;
+  peg.y = PEG_PARK_Y;
 }
 
 export type Rng = () => number;
 
 export type PegSpot = { x: number; y: number; kind: PegKind };
 
-/** What the last row did, so the next one does not copy it. */
-export type RowMemory = { pair: boolean; lane: number; singleX: number; lowSide: number };
+/** Opening is a two-step stage machine. Later rows remember shape, not an index. */
+export type RowStage = 'start' | 'opening' | 'run';
+
+export type RowMemory = {
+  stage: RowStage;
+  pair: boolean;
+  lane: number;
+  singleX: number;
+  lowSide: number;
+};
 
 export function freshRowMemory(): RowMemory {
-  return { pair: false, lane: -1, singleX: SHAFT_CENTER, lowSide: 1 };
+  return { stage: 'start', pair: false, lane: -1, singleX: SHAFT_CENTER, lowSide: 1 };
 }
 
 export type RowPlan = { spots: PegSpot[]; memory: RowMemory };
 
 /**
- * Row 0 is the green birth peg alone. Row 1 is one centered blue peg.
- * Later rows are a blue pair or one single, chosen so the same shape
- * and the same lane do not repeat on a beat. +y is down.
+ * Live nails occupy the camera window. Fill until a row sits PEG_FILL_LEAD
+ * above the view. Keep one jump above that so a just-placed row is not
+ * recycled on the next tick. Keep PEG_KEEP_BELOW below the screen.
  */
-export function planRow(index: number, prevY: number, rng: Rng, prev: RowMemory): RowPlan {
-  if (index === 0) {
+export type PegBand = {
+  viewTop: number;
+  viewBottom: number;
+  fillTop: number;
+  keepTop: number;
+  keepBottom: number;
+};
+
+export function pegBand(cameraY: number): PegBand {
+  const viewTop = cameraY;
+  const viewBottom = cameraY + DESIGN_HEIGHT;
+  const fillTop = viewTop - PEG_FILL_LEAD;
+  return {
+    viewTop,
+    viewBottom,
+    fillTop,
+    keepTop: fillTop - PEG_JUMP_MAX,
+    keepBottom: viewBottom + PEG_KEEP_BELOW,
+  };
+}
+
+export function pegInView(peg: Peg, band: PegBand): boolean {
+  return peg.live && peg.y >= band.viewTop && peg.y <= band.viewBottom;
+}
+
+/**
+ * Birth, then the centered opening blue peg, then procedural rows.
+ * Stage lives on memory so a hole in the chain never replays row 0.
+ */
+export function planNextRow(prevY: number, rng: Rng, prev: RowMemory): RowPlan {
+  if (prev.stage === 'start') {
     return {
       spots: [{ x: SHAFT_CENTER, y: PEG_LOWER_Y, kind: 'green' }],
-      memory: { pair: false, lane: -1, singleX: SHAFT_CENTER, lowSide: 1 },
+      memory: { stage: 'opening', pair: false, lane: -1, singleX: SHAFT_CENTER, lowSide: 1 },
     };
   }
-  if (index === 1) {
-    const y = prevY - PEG_OPEN_SINGLE_GAP;
+  if (prev.stage === 'opening') {
     return {
-      spots: [{ x: SHAFT_CENTER, y, kind: 'blue' }],
-      memory: { pair: false, lane: prev.lane, singleX: SHAFT_CENTER, lowSide: prev.lowSide },
+      spots: [{ x: SHAFT_CENTER, y: prevY - PEG_OPEN_SINGLE_GAP, kind: 'blue' }],
+      memory: { ...prev, stage: 'run' },
     };
   }
   let pair = rng() < 0.5;
@@ -150,13 +193,13 @@ export function planRow(index: number, prevY: number, rng: Rng, prev: RowMemory)
         { x: lane, y: y + leftDrop, kind: 'blue' },
         { x: DESIGN_WIDTH - lane, y: y + rightDrop, kind: 'blue' },
       ],
-      memory: { pair: true, lane, singleX: prev.singleX, lowSide },
+      memory: { stage: 'run', pair: true, lane, singleX: prev.singleX, lowSide },
     };
   }
   const kind: PegKind = rng() < RED_PEG_CHANCE ? 'red' : 'blue';
   return {
     spots: [{ x: singleX, y, kind }],
-    memory: { pair: false, lane: prev.lane, singleX, lowSide: prev.lowSide },
+    memory: { stage: 'run', pair: false, lane: prev.lane, singleX, lowSide: prev.lowSide },
   };
 }
 

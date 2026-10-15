@@ -14,11 +14,13 @@ import {
   claimPeg,
   createPegPool,
   freshRowMemory,
+  pegBand,
   pegSpent,
-  planRow,
+  planNextRow,
   releasePeg,
   tickPeg,
   type Peg,
+  type PegBand,
   type Rng,
   type RowMemory,
 } from './pegs';
@@ -39,7 +41,6 @@ import {
   AIM_EXTRA,
   feel,
   FIXED_DT,
-  PEG_RECYCLE_SCREENS,
   CAMERA_HOLD_HALF,
   CAMERA_X_GAIN,
   CAMERA_X_MAX,
@@ -96,8 +97,6 @@ export type Catch = {
 export type SlingWorld = {
   phase: Phase;
   pegs: Peg[];
-  /** Next row index to stamp onto a free pool slot. */
-  nextRow: number;
   /** Y of the last row placed. The birth row uses the green peg. */
   rowY: number;
   /** Shape of the last row, so the next row does not repeat it. */
@@ -161,13 +160,25 @@ function livePegs(world: SlingWorld): Peg[] {
   return world.pegs.filter((peg) => peg.live);
 }
 
-function highest(world: SlingWorld): Peg {
-  return livePegs(world).reduce((top, peg) => (peg.y < top.y ? peg : top));
+function highest(world: SlingWorld): Peg | null {
+  const live = livePegs(world);
+  if (live.length === 0) return null;
+  return live.reduce((top, peg) => (peg.y < top.y ? peg : top));
+}
+
+function lowest(world: SlingWorld): Peg | null {
+  const live = livePegs(world);
+  if (live.length === 0) return null;
+  return live.reduce((bottom, peg) => (peg.y > bottom.y ? peg : bottom));
+}
+
+function pegReserved(world: SlingWorld, peg: Peg): boolean {
+  return peg.id === world.heldId || peg.id === world.leftId;
 }
 
 /** Move free slots onto the next row. The pool size never changes. */
 function placeNextRow(world: SlingWorld): boolean {
-  const plan = planRow(world.nextRow, world.rowY, world.rng, world.rowMemory);
+  const plan = planNextRow(world.rowY, world.rng, world.rowMemory);
   const spots = plan.spots;
   const claimed: Peg[] = [];
   for (let i = 0; i < spots.length; i += 1) {
@@ -189,24 +200,46 @@ function placeNextRow(world: SlingWorld): boolean {
   }
   world.rowY = Math.min(...spots.map((spot) => spot.y));
   world.rowMemory = plan.memory;
-  world.nextRow += 1;
+  return true;
+}
+
+/** Free the lowest unreserved peg that is already below the screen. */
+function evictBelowView(world: SlingWorld, band: PegBand): boolean {
+  let spare: Peg | null = null;
+  for (const peg of world.pegs) {
+    if (!peg.live || pegReserved(world, peg)) continue;
+    if (peg.y <= band.viewBottom) continue;
+    if (!spare || peg.y > spare.y) spare = peg;
+  }
+  if (!spare) return false;
+  releasePeg(spare);
   return true;
 }
 
 /**
- * Screen height is A. A peg more than 1.5A above or below the body goes back
- * to the pool. The held peg and the one just left stay until the next grab.
+ * The live field is the camera band. Recycle outside it, then place rows
+ * until the top sits on the fill line. A full pool evicts off-screen
+ * nails below the view so the window can still grow upward.
  */
 function refillPegs(world: SlingWorld): void {
-  const limit = DESIGN_HEIGHT * PEG_RECYCLE_SCREENS;
+  const band = pegBand(world.cameraY);
   for (const peg of world.pegs) {
-    if (!peg.live) continue;
-    if (peg.id === world.heldId || peg.id === world.leftId) continue;
-    if (Math.abs(peg.y - world.body.y) > limit) releasePeg(peg);
+    if (!peg.live || pegReserved(world, peg)) continue;
+    if (peg.y < band.keepTop || peg.y > band.keepBottom) releasePeg(peg);
   }
-  const ceiling = world.cameraY - 80;
-  while (highest(world).y > ceiling) {
-    if (!placeNextRow(world)) break;
+  const top = highest(world);
+  if (!top) {
+    world.rowY = 0;
+    world.rowMemory = freshRowMemory();
+  } else if (top.y > world.rowY) {
+    world.rowY = top.y;
+    world.rowMemory = { ...world.rowMemory, stage: 'run' };
+  }
+  for (let n = 0; n < world.pegs.length * 2; n += 1) {
+    const head = highest(world);
+    if (head && head.y <= band.fillTop) break;
+    if (placeNextRow(world)) continue;
+    if (!evictBelowView(world, band)) break;
   }
 }
 
@@ -336,9 +369,9 @@ function cameraAim(world: SlingWorld): { y: number; vel: number } {
   const bodyFrame = world.body.y - anchorY();
   if (world.phase === 'launch' && bodyFrame > hangFrame) return { y: hangFrame, vel: 0 };
   if (world.phase === 'fly') {
-    const lowest = livePegs(world).reduce((bottom, peg) => (peg.y > bottom.y ? peg : bottom));
-    if (world.body.y > lowest.y + feel.grabRadius) {
-      const held = Math.min(bodyFrame, hangPoint(lowest).y - anchorY());
+    const floor = lowest(world);
+    if (floor && world.body.y > floor.y + feel.grabRadius) {
+      const held = Math.min(bodyFrame, hangPoint(floor).y - anchorY());
       return { y: held, vel: 0 };
     }
   }
@@ -403,7 +436,6 @@ export function createWorld(rng: Rng): SlingWorld {
   const world: SlingWorld = {
     phase: 'hang',
     pegs,
-    nextRow: 0,
     rowY: 0,
     rowMemory: freshRowMemory(),
     heldId: 1,
@@ -998,11 +1030,12 @@ export function stepWorld(world: SlingWorld, dt: number): void {
   // skips a peg that is still below the body. Fall only while moving
   // downward, past the lowest peg, and off the bottom of the camera.
   // An upward flight that starts below the screen is not a death.
-  const lowest = livePegs(world).reduce((y, peg) => Math.max(y, peg.y), -Infinity);
+  const floor = lowest(world);
   if (
+    floor &&
     (world.phase === 'fly' || world.phase === 'launch') &&
     world.body.vy > 0 &&
-    world.body.y > lowest + feel.grabRadius &&
+    world.body.y > floor.y + feel.grabRadius &&
     world.body.y > world.cameraY + DESIGN_HEIGHT
   ) {
     world.phase = 'fall';

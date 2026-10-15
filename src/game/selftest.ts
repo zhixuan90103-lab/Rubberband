@@ -1,8 +1,8 @@
-import { freshRowMemory, mulberry32, planRow, type PegSpot } from './pegs';
+import { freshRowMemory, mulberry32, pegBand, pegInView, PEG_PARK_Y, planNextRow, releasePeg, type PegSpot } from './pegs';
 import { initPhysics } from './sim';
 import { beginEnter, cancelDrag, createWorld, dragTo, endDrag, pointerToWorld, readAim, stepWorld, tryBeginDrag } from './sling';
 import { DESIGN_HEIGHT } from '../adapt/design';
-import { AIM_EXTRA, armMax, armSlack, BLUE_PEG_LIFE, BODY_RADIUS, feel, PEG_JUMP_MAX, PEG_JUMP_MIN, PEG_LOWER_Y, PEG_OPEN_SINGLE_GAP, PEG_POOL, PEG_RECYCLE_SCREENS, SHAFT_CENTER, SHAFT_LEFT, SHAFT_RIGHT } from './tune';
+import { AIM_EXTRA, armMax, armSlack, BLUE_PEG_LIFE, BODY_RADIUS, feel, PEG_JUMP_MAX, PEG_JUMP_MIN, PEG_LOWER_Y, PEG_OPEN_SINGLE_GAP, PEG_POOL, SHAFT_CENTER, SHAFT_LEFT, SHAFT_RIGHT } from './tune';
 
 function shortestSpin(delta: number): number {
   const tau = Math.PI * 2;
@@ -17,6 +17,10 @@ await initPhysics();
 
 const world = createWorld(mulberry32(1));
 assert(world.pegs.length === PEG_POOL, `the peg pool stays at ${PEG_POOL}`);
+assert(
+  world.pegs.every((peg, i) => peg.id === i + 1),
+  'pool slots stay aligned with ids 1..N',
+);
 assert(world.body.y === world.pegs[0].y + feel.restDrop, 'body hangs below the peg');
 assert(world.pegs[0].kind === 'green' && world.pegs[0].live, 'the birth peg is the green slot');
 assert(Math.abs(world.pegs[0].y - PEG_LOWER_Y) < 0.5, 'the start peg sits on the feet');
@@ -383,6 +387,13 @@ stepWorld(cooled, 1 / 60);
 stepWorld(cooled, 1 / 60);
 assert(bluePeg.age === 0 && bluePeg.cool === 0, 'the cooldown resets the hang timer');
 
+for (let seed = 1; seed <= 24; seed += 1) {
+  const opening = createWorld(mulberry32(seed));
+  const band = pegBand(opening.cameraY);
+  const onScreen = opening.pegs.filter((peg) => pegInView(peg, band));
+  assert(onScreen.length >= 1, `seed ${seed} opens with no peg on the camera`);
+}
+
 const pooled = createWorld(mulberry32(11));
 const before = pooled.pegs.length;
 pooled.phase = 'fall';
@@ -390,22 +401,53 @@ pooled.cameraY = pooled.pegs[0].y - 2400;
 for (let i = 0; i < 40; i += 1) stepWorld(pooled, 1 / 60);
 assert(pooled.pegs.length === before, 'climbing does not allocate pegs');
 assert(
-  pooled.pegs.some((peg) => peg.live && peg.y < pooled.cameraY),
-  'a pooled slot is placed above the climbed camera',
+  pooled.pegs.some((peg) => pegInView(peg, pegBand(pooled.cameraY))),
+  'the camera window still has a peg after the camera jumps up',
 );
-assert(pooled.pegs[0].kind === 'green' && pooled.pegs[0].y === PEG_LOWER_Y, 'the birth peg stays while the body is still there');
+
+const enter = createWorld(mulberry32(13));
+const fromX = enter.body.x;
+beginEnter(enter, fromX);
+stepWorld(enter, 1 / 60);
+assert(
+  enter.pegs.some((peg) => pegInView(peg, pegBand(enter.cameraY))),
+  'the entrance flight keeps pegs on the camera',
+);
 
 const ranged = createWorld(mulberry32(12));
-const limit = DESIGN_HEIGHT * PEG_RECYCLE_SCREENS;
+const band = pegBand(ranged.cameraY);
 const stray = ranged.pegs.find((peg) => peg.live && peg.id !== ranged.heldId);
 if (!stray) throw new Error('a peg to push out of range is missing');
-stray.y = ranged.body.y + limit + 40;
+stray.y = band.keepBottom + 40;
 stepWorld(ranged, 1 / 60);
+assert(!stray.live, 'a peg below the keep band is recycled');
+assert(stray.y === PEG_PARK_Y, 'a recycled slot parks off the field');
+
+const sky = createWorld(mulberry32(16));
+const skyBand = pegBand(sky.cameraY);
+const far = sky.pegs.find((peg) => peg.live && peg.id !== sky.heldId);
+if (!far) throw new Error('a peg to push above the camera is missing');
+far.y = skyBand.keepTop - 40;
+stepWorld(sky, 1 / 60);
+assert(!far.live, 'a peg above the keep band is recycled');
+
+const edge = createWorld(mulberry32(17));
+const edgeBand = pegBand(edge.cameraY);
+const slackPeg = edge.pegs.find((peg) => peg.live && peg.id !== edge.heldId);
+if (!slackPeg) throw new Error('a peg to park on the fill slack is missing');
+slackPeg.y = edgeBand.fillTop - 10;
+stepWorld(edge, 1 / 60);
+assert(slackPeg.live, 'a peg between fillTop and keepTop stays');
+
+const hole = createWorld(mulberry32(15));
+for (const peg of hole.pegs) {
+  if (peg.live && peg.id !== hole.heldId) releasePeg(peg);
+}
+hole.rowY = hole.body.y - 4000;
+stepWorld(hole, 1 / 60);
 assert(
-  ranged.pegs.every(
-    (peg) => !peg.live || peg.id === ranged.heldId || peg.id === ranged.leftId || Math.abs(peg.y - ranged.body.y) <= limit,
-  ),
-  'a peg more than one and a half screens from the body is recycled',
+  hole.pegs.some((peg) => peg.live && peg.y < hole.cameraY),
+  'a broken chain refills above the camera from the highest peg left',
 );
 
 const wallClear = feel.restDrop + feel.minPull;
@@ -414,12 +456,12 @@ const bodyMax = SHAFT_RIGHT - BODY_RADIUS - wallClear;
 let rowMemory = freshRowMemory();
 let rowY = 0;
 let previous: PegSpot[] = [];
-const placed = planRow(0, rowY, mulberry32(3), rowMemory);
+const placed = planNextRow(rowY, mulberry32(3), rowMemory);
 rowMemory = placed.memory;
 rowY = placed.spots[0].y;
 previous = placed.spots;
 for (let index = 1; index < 40; index += 1) {
-  const plan = planRow(index, rowY, mulberry32(3), rowMemory);
+  const plan = planNextRow(rowY, mulberry32(3), rowMemory);
   for (const from of previous) {
     for (const to of plan.spots) {
       const distance = Math.hypot(from.x - to.x, from.y - to.y);
