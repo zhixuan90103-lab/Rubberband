@@ -72,7 +72,19 @@ export type Catch = {
   surge0: number;
   spinFrom: number;
   sign: number;
-  /** Signed angle from the grab pose to the next crown-up angle. */
+  /** Where the body was on the grab, used to see if the rope actually swings. */
+  fromX: number;
+  fromY: number;
+  fromAngle: number;
+  /**
+   * `wait` until the rope shows a real swing. `long` takes the long arc.
+   * `rest` settles to the nearest upright.
+   */
+  spinMode: 'wait' | 'long' | 'rest';
+  /**
+   * Signed angle from the pose when the swing was accepted to crown-up
+   * along the long arc. Zero while waiting or when the rope barely moves.
+   */
   turn: number;
   /** `out` is the carry past the peg. `back` is the fall back to the hang. */
   stage: 'out' | 'back';
@@ -663,14 +675,19 @@ function grab(world: SlingWorld, peg: Peg): void {
     world.body.y = peg.y + dy;
   }
   const speed = Math.hypot(world.body.vx, world.body.vy) || 1;
+  const sign = Math.sign(catchSpin(dx, dy, world.body.vx, world.body.vy)) || 1;
   world.catch = {
     held: true,
     dirX: world.body.vx / speed,
     dirY: world.body.vy / speed,
     surge0: speed,
     spinFrom: world.body.spin,
-    sign: Math.sign(catchSpin(dx, dy, world.body.vx, world.body.vy)) || 1,
-    turn: turnToUpright(world.body.spin, Math.sign(catchSpin(dx, dy, world.body.vx, world.body.vy)) || 1),
+    sign,
+    fromX: world.body.x,
+    fromY: world.body.y,
+    fromAngle: Math.atan2(dx, dy),
+    spinMode: 'wait',
+    turn: 0,
     stage: 'out',
     progress: 0,
     span: 1,
@@ -681,6 +698,10 @@ function grab(world: SlingWorld, peg: Peg): void {
 
 const REST_SPEED = 16;
 const REST_ANGLE = 0.06;
+/** Body travel after the grab that counts as a real rope swing. */
+const CATCH_SWING_MOVE = 72;
+/** Rope-angle change after the grab that counts as a real swing. */
+const CATCH_SWING_ANGLE = 1.05;
 
 /** Park a crossed shot on the slack circle and keep the velocity it already has. */
 function releaseIfSlack(world: SlingWorld, peg: Peg): boolean {
@@ -785,10 +806,28 @@ function stepCatch(world: SlingWorld, peg: Peg, dt: number): void {
     world.body.y > peg.y &&
     Math.abs(reach - feel.restDrop) < 4 &&
     speed < 40;
-  // Same spring as aiming and settling. The goal was chosen on the grab,
-  // and the flight's spinVel is left alone so the roll bends into the turn.
-  const goal = world.catch.spinFrom + world.catch.turn;
-  steerSpin(world.body, goal, dt, catchTurnRate(world.catch.surge0));
+  // Speed at the grab is not the swing. A head-on catch near 500 px/s
+  // barely moves the rope and should not turn. Wait until the body travels
+  // or the rope angle changes, then take the long arc from that pose.
+  if (world.catch.spinMode === 'wait') {
+    world.body.spin += world.body.spinVel * dt;
+    const moved = Math.hypot(world.body.x - world.catch.fromX, world.body.y - world.catch.fromY);
+    let dang = Math.atan2(dx, dy) - world.catch.fromAngle;
+    dang -= Math.round(dang / (Math.PI * 2)) * Math.PI * 2;
+    if (moved >= CATCH_SWING_MOVE || Math.abs(dang) >= CATCH_SWING_ANGLE) {
+      world.catch.spinMode = 'long';
+      world.catch.spinFrom = world.body.spin;
+      world.catch.turn = turnToUpright(world.body.spin, world.catch.sign);
+    } else if (world.catch.stage === 'back') {
+      world.catch.spinMode = 'rest';
+    }
+  }
+  if (world.catch.spinMode === 'wait') return;
+  const goal = world.catch.spinMode === 'long'
+    ? world.catch.spinFrom + world.catch.turn
+    : nearestAngle(world.body.spin, 0);
+  const rate = world.catch.spinMode === 'long' ? catchTurnRate(world.catch.surge0) : feel.settleSpin;
+  steerSpin(world.body, goal, dt, rate);
   const landed = Math.abs(world.body.spin - goal) < 0.08 && Math.abs(world.body.spinVel) < 0.6;
   if (hung && landed) world.catch = null;
 }

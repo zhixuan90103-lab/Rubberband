@@ -261,6 +261,47 @@ for (let i = 0; i < 240; i += 1) stepWorld(drop, 1 / 60);
 assert(drop.body.y > dropPeg.y, 'a downward catch ends under the peg');
 assert(Math.abs(shortestSpin(drop.body.spin)) < 0.25, 'a downward catch ends crown-up');
 
+const soft = createWorld(mulberry32(11));
+const softPeg = soft.pegs[0];
+soft.phase = 'fly';
+soft.body.x = softPeg.x;
+soft.body.y = softPeg.y + feel.grabRadius + 3;
+soft.body.vx = 0;
+soft.body.vy = -200;
+soft.body.spin = 0.5;
+soft.body.spinVel = 0;
+for (let i = 0; i < 20 && String(soft.phase) === 'fly'; i += 1) stepWorld(soft, 1 / 60);
+assert(String(soft.phase) === 'hang', 'a slow arrival still catches');
+assert(soft.catch !== null && soft.catch.spinMode === 'wait', 'a slow arrival waits to see the rope');
+const soft0 = soft.body.spin;
+let softSpun = 0;
+for (let i = 0; i < 240; i += 1) {
+  stepWorld(soft, 1 / 60);
+  softSpun = Math.max(softSpun, Math.abs(shortestSpin(soft.body.spin - soft0)));
+}
+assert(softSpun < 1.2, 'a slow arrival does not play a full turn');
+assert(Math.abs(shortestSpin(soft.body.spin)) < 0.25, 'a slow arrival still ends crown-up');
+
+const flat = createWorld(mulberry32(13));
+const flatPeg = flat.pegs[0];
+flat.phase = 'fly';
+flat.body.x = flatPeg.x;
+flat.body.y = flatPeg.y + feel.grabRadius + 8;
+flat.body.vx = 0;
+flat.body.vy = -600;
+flat.body.spin = 0.4;
+flat.body.spinVel = 0;
+for (let i = 0; i < 30 && String(flat.phase) === 'fly'; i += 1) stepWorld(flat, 1 / 60);
+assert(String(flat.phase) === 'hang', 'a head-on arrival catches');
+const flat0 = flat.body.spin;
+let flatSpun = 0;
+for (let i = 0; i < 240; i += 1) {
+  stepWorld(flat, 1 / 60);
+  flatSpun = Math.max(flatSpun, Math.abs(shortestSpin(flat.body.spin - flat0)));
+}
+assert(flatSpun < 1.2, 'a catch that barely swings the rope does not play a full turn');
+assert(Math.abs(shortestSpin(flat.body.spin)) < 0.25, 'a catch that barely swings still ends crown-up');
+
 const look = createWorld(mulberry32(10));
 const centerPeg = look.pegs[0];
 look.phase = 'fall';
