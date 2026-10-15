@@ -62,6 +62,16 @@ export type Body = {
   spinVel: number;
 };
 
+/**
+ * Catch facing, separate from the arm.
+ * `watch` only keeps the flight spin. `arc` is one locked long turn to
+ * crown-up. `settle` is the short turn to the nearest upright.
+ */
+export type CatchFacing =
+  | { kind: 'watch'; fromX: number; fromY: number; fromAngle: number; sign: number }
+  | { kind: 'arc'; goal: number }
+  | { kind: 'settle' };
+
 /** Present while the catch band has not settled back to the hang length. */
 export type Catch = {
   held: true;
@@ -70,22 +80,11 @@ export type Catch = {
   dirY: number;
   /** Speed along that direction at the grab. */
   surge0: number;
-  spinFrom: number;
-  sign: number;
-  /** Where the body was on the grab, used to see if the rope actually swings. */
-  fromX: number;
-  fromY: number;
-  fromAngle: number;
   /**
-   * `wait` until the rope shows a real swing. `long` takes the long arc.
-   * `rest` settles to the nearest upright.
+   * Facing while this catch lasts. Watch the rope first. A real swing
+   * locks one long arc. A rope that dies first settles to the nearest upright.
    */
-  spinMode: 'wait' | 'long' | 'rest';
-  /**
-   * Signed angle from the pose when the swing was accepted to crown-up
-   * along the long arc. Zero while waiting or when the rope barely moves.
-   */
-  turn: number;
+  facing: CatchFacing;
   /** `out` is the carry past the peg. `back` is the fall back to the hang. */
   stage: 'out' | 'back';
   /** 0 at the grab, 1 when the fall-back has reached the hang. Never decreases. */
@@ -675,19 +674,18 @@ function grab(world: SlingWorld, peg: Peg): void {
     world.body.y = peg.y + dy;
   }
   const speed = Math.hypot(world.body.vx, world.body.vy) || 1;
-  const sign = Math.sign(catchSpin(dx, dy, world.body.vx, world.body.vy)) || 1;
   world.catch = {
     held: true,
     dirX: world.body.vx / speed,
     dirY: world.body.vy / speed,
     surge0: speed,
-    spinFrom: world.body.spin,
-    sign,
-    fromX: world.body.x,
-    fromY: world.body.y,
-    fromAngle: Math.atan2(dx, dy),
-    spinMode: 'wait',
-    turn: 0,
+    facing: {
+      kind: 'watch',
+      fromX: world.body.x,
+      fromY: world.body.y,
+      fromAngle: Math.atan2(dx, dy),
+      sign: catchTurnSign(dx, dy, world.body.vx, world.body.vy),
+    },
     stage: 'out',
     progress: 0,
     span: 1,
@@ -762,19 +760,20 @@ function stepAttached(world: SlingWorld, dt: number, release: boolean): void {
   }
 }
 
-/**
- * Angular kick from the tangential speed, rad/s. A real sideways hit
- * gets enough speed to finish the turn. A head-on hit stays small.
- */
-function catchSpin(dx: number, dy: number, vx: number, vy: number): number {
+/** Which way a long catch turn goes. Sideways hits follow the tangent. */
+function catchTurnSign(dx: number, dy: number, vx: number, vy: number): number {
   const reach = Math.hypot(dx, dy) || 1;
   const tangent = (dx * vy - dy * vx) / reach;
-  const speed = Math.hypot(vx, vy);
-  // Head-on, including a straight upward catch, has almost no tangent.
-  // Still give a visible turn. The coast rate below keeps it near one revolution.
-  const sign = Math.sign(tangent) || -Math.sign(vy) || 1;
-  const kick = Math.max(Math.abs(tangent) * 0.006, speed > 180 ? 6 : 0);
-  return sign * Math.min(8, kick);
+  return Math.sign(tangent) || -Math.sign(vy) || 1;
+}
+
+/** How far the rope has moved since the grab. */
+function ropeSwing(facing: Extract<CatchFacing, { kind: 'watch' }>, x: number, y: number, pegX: number, pegY: number): { moved: number; turned: number } {
+  const moved = Math.hypot(x - facing.fromX, y - facing.fromY);
+  let turned = Math.atan2(x - pegX, y - pegY) - facing.fromAngle;
+  const tau = Math.PI * 2;
+  turned -= Math.round(turned / tau) * tau;
+  return { moved, turned };
 }
 
 /** The catch pose. Motion is the same arm as a hang. */
@@ -806,30 +805,35 @@ function stepCatch(world: SlingWorld, peg: Peg, dt: number): void {
     world.body.y > peg.y &&
     Math.abs(reach - feel.restDrop) < 4 &&
     speed < 40;
-  // Speed at the grab is not the swing. A head-on catch near 500 px/s
-  // barely moves the rope and should not turn. Wait until the body travels
-  // or the rope angle changes, then take the long arc from that pose.
-  if (world.catch.spinMode === 'wait') {
-    world.body.spin += world.body.spinVel * dt;
-    const moved = Math.hypot(world.body.x - world.catch.fromX, world.body.y - world.catch.fromY);
-    let dang = Math.atan2(dx, dy) - world.catch.fromAngle;
-    dang -= Math.round(dang / (Math.PI * 2)) * Math.PI * 2;
-    if (moved >= CATCH_SWING_MOVE || Math.abs(dang) >= CATCH_SWING_ANGLE) {
-      world.catch.spinMode = 'long';
-      world.catch.spinFrom = world.body.spin;
-      world.catch.turn = turnToUpright(world.body.spin, world.catch.sign);
-    } else if (world.catch.stage === 'back') {
-      world.catch.spinMode = 'rest';
-    }
-  }
-  if (world.catch.spinMode === 'wait') return;
-  const goal = world.catch.spinMode === 'long'
-    ? world.catch.spinFrom + world.catch.turn
-    : nearestAngle(world.body.spin, 0);
-  const rate = world.catch.spinMode === 'long' ? catchTurnRate(world.catch.surge0) : feel.settleSpin;
-  steerSpin(world.body, goal, dt, rate);
+  world.catch.facing = stepCatchFacing(world.body, world.catch.facing, peg, world.catch.surge0, world.catch.stage, dt);
+  if (world.catch.facing.kind === 'watch') return;
+  const goal = catchGoal(world.catch.facing, world.body.spin);
   const landed = Math.abs(world.body.spin - goal) < 0.08 && Math.abs(world.body.spinVel) < 0.6;
   if (hung && landed) world.catch = null;
+}
+
+/**
+ * One catch pose. A rope that swings locks the long arc. A rope that
+ * stops first uses the hang settle. Arrival speed only scales the long arc.
+ */
+function stepCatchFacing(body: Body, facing: CatchFacing, peg: Peg, surge0: number, stage: Catch['stage'], dt: number): CatchFacing {
+  if (facing.kind === 'watch') {
+    body.spin += body.spinVel * dt;
+    const swing = ropeSwing(facing, body.x, body.y, peg.x, peg.y);
+    if (swing.moved >= CATCH_SWING_MOVE || Math.abs(swing.turned) >= CATCH_SWING_ANGLE) {
+      return { kind: 'arc', goal: body.spin + turnToUpright(body.spin, facing.sign) };
+    }
+    if (stage === 'back') return { kind: 'settle' };
+    return facing;
+  }
+  const goal = catchGoal(facing, body.spin);
+  const rate = facing.kind === 'arc' ? catchTurnRate(surge0) : feel.settleSpin;
+  steerSpin(body, goal, dt, rate);
+  return facing;
+}
+
+function catchGoal(facing: Exclude<CatchFacing, { kind: 'watch' }>, spin: number): number {
+  return facing.kind === 'arc' ? facing.goal : nearestAngle(spin, 0);
 }
 
 function stepHang(world: SlingWorld, dt: number): void {

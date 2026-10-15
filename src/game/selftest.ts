@@ -272,7 +272,7 @@ soft.body.spin = 0.5;
 soft.body.spinVel = 0;
 for (let i = 0; i < 20 && String(soft.phase) === 'fly'; i += 1) stepWorld(soft, 1 / 60);
 assert(String(soft.phase) === 'hang', 'a slow arrival still catches');
-assert(soft.catch !== null && soft.catch.spinMode === 'wait', 'a slow arrival waits to see the rope');
+assert(soft.catch !== null && soft.catch.facing.kind === 'watch', 'a slow arrival waits to see the rope');
 const soft0 = soft.body.spin;
 let softSpun = 0;
 for (let i = 0; i < 240; i += 1) {
