@@ -18,8 +18,9 @@
 | Safe Area | `src/adapt/safeArea.ts` + `src/style.css` |
 | WebGPU | `src/create-renderer.ts` |
 | 震动 JS | `src/utils/haptics.ts` |
+| 玩法震动 | `src/game/feelHaptics.ts` · `tune.ts` 的 `hapticDefaults` |
 | 震动 Swift 真源 | `plugins/native-haptics/*` |
-| 震动怎么接 | `docs/HAPTICS.md` **§0 正确接入** |
+| 震动怎么接 | `docs/HAPTICS.md` **§0 接入** · **§8 四处规则** |
 | Capacitor | `capacitor.config.ts`（`contentInset: never`） |
 | 构建 | `vite.config.ts`（**`base: './'`**） |
 | iOS 注入 | `scripts/bootstrap-ios.mjs` |
@@ -47,7 +48,7 @@
 4. **布局坐标 390×844**；禁止 `renderer.setSize(window.innerWidth,…)`  
 5. **UI 只挂 `#ui-root`**；禁止玩法 UI `position: fixed` 贴浏览器窗  
 6. **Pad 只改外层视口**，不改 `DESIGN_*`  
-7. **改 Swift 改 `plugins/native-haptics/`** 再 `ios:bootstrap`；震动接线见 `docs/HAPTICS.md`。Capacitor 8 的 `SceneDelegate` 必须 `rootViewController = BridgeViewController()`（默认 `CAPBridgeViewController` 不会注册插件）。不要用 JS `prepare()` 判断是否接上；真机 HUD 看 `plugin: true` + 点「点我震动」。  
+7. **改 Swift 改 `plugins/native-haptics/`** 再 `ios:bootstrap`；接线见 `docs/HAPTICS.md`。Capacitor 8 的 `SceneDelegate` 必须 `rootViewController = BridgeViewController()`（默认 `CAPBridgeViewController` 不会注册插件）。不要用 JS `prepare()` 判断是否接上。玩法震动只从 `src/game/feelHaptics.ts` 发，数字以 `hapticDefaults` 为准。  
 8. **无 WebGPU 则明确失败**，不静默 WebGL  
 
 ## 命令

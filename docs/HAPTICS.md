@@ -2,9 +2,8 @@
 
 配套：[AGENTS.md](../AGENTS.md) · [ENGINEERING.md](./ENGINEERING.md) · [AUDIO.md](./AUDIO.md)
 
-> 本壳 **已经带原生插件 + JS 薄封装**，但只验通路，不是玩法层。  
-> 以前多次「没接上」，几乎都是 **只 sync、没 bootstrap**，或 **用 `prepare()` 当验收**。  
-> 正确接入按 **§0** 做；后面是差异、API、排错。
+> 插件接入按 **§0**。玩法四处震动在 **§8**，数字以 `src/game/tune.ts` 的 `hapticDefaults` 为准。  
+> 以前多次「没接上」，几乎都是 **只 sync、没 bootstrap**，或 **用 `prepare()` 当验收**。
 
 ## 0. 正确接入（照这个做）
 
@@ -207,38 +206,11 @@ npm run cap:open
 
 `jsName` 必须是 **`AdvancedHaptics`**，和 `isPluginAvailable('AdvancedHaptics')` 同一字符串。
 
-### 3.3 玩法层（本壳没有，自己加）
+### 3.3 玩法层
 
-不要在 `main.ts` 里到处 `haptics.impact`。加一层具名事件：
+玩法只从 `src/game/feelHaptics.ts` 发震。`main.ts` 在指针和阶段变化处调用它，不直接打插件。参数是 `src/game/tune.ts` 的 `haptic`，面板「参数」可改，「恢复」回到 `hapticDefaults`。浏览器上这些调用是空操作。
 
-```ts
-// 示例：只允许从这里发震
-export const gameHaptics = {
-  buttonTap() {
-    if (!enabled || onCooldown('button', 60)) return;
-    void haptics.impact('light');           // 短点击：UIKit
-  },
-  popSmall() {
-    if (!enabled || onCooldown('popSmall', 90)) return;
-    void haptics.playPattern([{ type: 'transient', intensity: 0.4, sharpness: 0.3 }]);
-  },
-  stackImpact(intensity: number) {
-    if (!enabled || onCooldown('stack', 90)) return;
-    void haptics.stackImpact(intensity, 0.15);
-  },
-};
-```
-
-规则：
-
-- 所有出口先查 **开关**，再查 **cooldown**
-- 短系统感：`impact` / `selection`（UIKit）
-- 可调强弱、碰撞 patter：`stackImpact` / `playPattern`（Core Haptics）
-- 长摩擦：`startContinuous` + `stopContinuous`，离开关卡必须 stop
-- 调用 **fire-and-forget**（`void`），不要 `await` 堵逻辑帧
-- 与音效并列：`gameHaptics.x()` 旁一行 `audio.playSfx('x')`
-
-强度映射、pattern 表放到 `src/config/HapticsConfig.ts`（或和 Audio Catalog 同级），不要写死在物理循环里。
+调用 `void` 出去，不要 `await` 堵逻辑帧。蓄力连续震动的强度变化超过约 0.02 才过桥。
 
 ### 3.4 桌面 vs 真机
 
@@ -258,8 +230,9 @@ Swift `pluginMethods` **只有这些**。JS 多调一个就会 UNIMPLEMENTED。
 | `notification({ type })` | UIKit | success/warning/error |
 | `selection()` | UIKit | 选择条 |
 | `stackImpact({ intensity, sharpness })` | Core Haptics transient | 碰撞等高频可调强弱 |
-| `playPattern({ events, parameterCurves? })` | Core Haptics | 具名复杂节奏 |
-| `startContinuousHaptic` / `stopContinuousHaptic` | Core Haptics | 长按 / 摩擦底；stop 会淡出约 50ms |
+| `playPattern({ events, parameterCurves? })` | Core Haptics | 一条图案。新的一条会停掉上一条 |
+| `startContinuousHaptic` / `updateContinuousHaptic` / `stopContinuousHaptic` | Core Haptics | 蓄力底。事件基准强度和锐度是 1，`update` 用动态参数改；stop 淡出约 50ms |
+| `startGrainHaptic` / `stopGrainHaptic` | Core Haptics | 接近拉满时的碎抖，和连续震动分开 |
 | `setKeepAwake({ enabled })` | `isIdleTimerDisabled` | **不是震动**，是防锁屏 |
 
 **没有 `prepare`。** 本壳 `haptics.prepare()` 若走到 `AdvancedHaptics.prepare()`，第一次接插件就会在日志里「失败」，引擎其实是好的。
@@ -307,3 +280,27 @@ Swift `pluginMethods` **只有这些**。JS 多调一个就会 UNIMPLEMENTED。
 - 关 App 再开仍能震（engine 随 plugin load）
 - 切后台再回前台仍能震（`resetHandler` 会再 start）
 - 连续点不会卡帧；加上 cooldown 后不会震糊
+
+玩法验收在真机上拉、抓、撞墙、掉落各走一遍。桌面听不到是正常的。四处的规则见 §8。
+
+## 8. 现行玩法震动
+
+四处。数字在 `hapticDefaults`。回弹算法对齐弹簧球的 Decay：一条图案里排好，不按物理换向再开播放器。
+
+| 时机 | 怎么响 | 停 |
+|---|---|---|
+| 拉动蓄力 | `drag` 期间一条连续震动。强度、锐度在最小和最大之间，跟 `(reach - restDrop) / maxPull`。比例达到 `grainAt` 时另叠一层碎抖 | 松手、取消，或阶段离开 `drag`（含铆钉失效） |
+| 抓住 | 立刻一声固定瞬态。可选一段余韵，默认关 | 一次 |
+| 抓住后的回弹 | 和抓住放在同一条 `playPattern` 里 | 下一次图案会停掉这一条 |
+| 撞墙 | 飞行中 `vx` 变号且来速大于 80 时一声。强度是 `wallMul × (|vx| - 80) / 1000`，低于 `wallFloor` 不响 | 一次 |
+| 死亡 | 进入 `fall` 一声，强度 `deathI`、锐度 `deathS`。同一次坠落不重复 | 一次 |
+
+满拉来势约 2338 px/s 算回弹力度 1，小于此按比例。回弹：
+
+- 第一拍前空 `reboundGapMs`。之后每 1/6 秒一拍。
+- 拍数 = `reboundBase + 力度 × reboundEnergy`。
+- 第 i 拍进度 = `i / 拍数`。强度 = `(1 - 进度) ^ (reboundDamp - 力度 × reboundDampEnergy) × 力度`。低于 `reboundFloor` 的拍子丢掉。
+- 锐度 = `max(0.1, reboundS - 进度 × reboundSDrop)`。
+- 余韵在瞬态后 10 毫秒。强度是该拍瞬态的 `reboundTailI`，锐度是该拍锐度的 `reboundTailS × (1 - 进度 × 0.3)`。时长是 `reboundTailMs × (1 - 进度 × 0.5)` 毫秒。
+
+抓住那一声用 `grabI` / `grabS`，不跟来势走。它的余韵用 `grabTail*`，和回弹余韵不是同一组数。

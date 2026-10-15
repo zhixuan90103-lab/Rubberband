@@ -108,8 +108,9 @@ SceneDelegate.rootViewController = BridgeViewController()
 
 只改 storyboard **不够**：Capacitor 8 用 SceneDelegate 直接 `CAPBridgeViewController()`，会绕过 storyboard，HUD 出现 `plugin: false`，按钮无震。
 
-Swift **没有** `prepare`；引擎在 `load()` 启动。UIKit 反馈在主线程触发。验收用 HUD **点我震动**（`impact`）和状态行 `plugin: true`。  
-业务节奏（具名事件、cooldown、开关）写在游戏层，不要改插件除非新增原生方法。
+Swift **没有** `prepare`；引擎在 `load()` 启动。UIKit 反馈在主线程触发。插件是否挂上，用真机上 `isPluginAvailable('AdvancedHaptics')` 和拉、抓时有没有震来确认。拉射页没有「点我震动」按钮。
+
+玩法四处在 `src/game/feelHaptics.ts`。蓄力用连续震动加碎抖；抓住和回弹是一条 `playPattern`。规则和公式见 [HAPTICS.md](./HAPTICS.md) §8。默认数在 `hapticDefaults`。不要在 `main.ts` 里直接打插件。
 
 ## 7b. Audio（尚未实现）
 

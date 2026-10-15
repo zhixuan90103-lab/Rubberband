@@ -24,7 +24,7 @@ index.html
        → 指针：#stage 盒子 → 设计坐标 → pointerToWorld → tryBeginDrag / dragTo / endDrag
 ```
 
-震动代码还在 `src/utils/haptics.ts`，当前画面没有「点我震动」按钮。真机验收步骤仍见 [HAPTICS.md](./HAPTICS.md)。
+震动玩法在 `src/game/feelHaptics.ts`，经 `src/utils/haptics.ts` 进原生插件。参数在 `tune.ts` 的 `haptic`。真机接入见 [HAPTICS.md](./HAPTICS.md) §0，四处规则见 §8。拉射页没有单独的「点我震动」按钮。
 
 ## 3. DOM
 
@@ -54,7 +54,7 @@ Xcode Run 真机
   → 同上 Web 链
 ```
 
-震动插件注册后，HUD 状态行才会有 `plugin: true/false`。`false` = 仍在默认 `CAPBridgeViewController`，插件未进 JS `PluginHeaders`。当前拉射页没有这块 HUD。
+插件没注册时，真机上拉和抓也没有震动。`isPluginAvailable('AdvancedHaptics') === false` 表示仍在默认 `CAPBridgeViewController`。当前拉射页没有状态 HUD。
 
 ## 5. 改配置找谁
 
@@ -64,6 +64,7 @@ Xcode Run 真机
 | appId | `capacitor.config.ts` |
 | 设计分辨率 | `design.ts` + `style.css` |
 | 震动原生 | `plugins/native-haptics/*.swift` + bootstrap |
+| 玩法震动 | `src/game/feelHaptics.ts` · `tune.ts` 的 `hapticDefaults` · [HAPTICS.md](./HAPTICS.md) §8 |
 | 启动 HUD | `index.html` + `main.ts` |
 | 现行物理和默认数 | [PHYSICS-PLAN.md](./PHYSICS-PLAN.md) · `src/game/tune.ts` |
 | 调参面板 | `src/game/tunePanel.ts` |
