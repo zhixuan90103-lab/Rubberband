@@ -64,6 +64,81 @@ export const feelDefaults: Feel = {
 
 export const feel: Feel = { ...feelDefaults };
 
+/** Live haptic knobs. SpringBall stretch / snap / decay / echo defaults. */
+export type HapticFeel = {
+  tensionMinI: number;
+  tensionMaxI: number;
+  tensionMinS: number;
+  tensionMaxS: number;
+  grainAt: number;
+  grainI: number;
+  grainS: number;
+  grainHz: number;
+  /** Grab hit. Fixed, not scaled by arrival speed. */
+  grabI: number;
+  grabS: number;
+  /** One continuous tail right after the grab hit. */
+  grabTailI: number;
+  grabTailS: number;
+  grabTailMs: number;
+  /** SpringBall decay. Count is base + force × bounceEnergy. */
+  reboundGapMs: number;
+  reboundBase: number;
+  reboundEnergy: number;
+  reboundDamp: number;
+  reboundDampEnergy: number;
+  reboundS: number;
+  reboundSDrop: number;
+  reboundFloor: number;
+  /** Tail after each rebound transient, as a fraction of that transient. */
+  reboundTailMs: number;
+  reboundTailI: number;
+  reboundTailS: number;
+  wallMul: number;
+  wallS: number;
+  wallFloor: number;
+  deathI: number;
+  deathS: number;
+};
+
+export const hapticDefaults: HapticFeel = {
+  tensionMinI: 0.1,
+  tensionMaxI: 0.3,
+  tensionMinS: 0.1,
+  tensionMaxS: 0.3,
+  grainAt: 0.6,
+  grainI: 0.3,
+  grainS: 0,
+  grainHz: 35,
+  grabI: 0.49,
+  grabS: 0.3,
+  grabTailI: 0,
+  grabTailS: 0,
+  grabTailMs: 0,
+  reboundGapMs: 50,
+  reboundBase: 3,
+  reboundEnergy: 2,
+  reboundDamp: 6,
+  reboundDampEnergy: 3,
+  reboundS: 0.11,
+  reboundSDrop: 0.47,
+  reboundFloor: 0.25,
+  reboundTailMs: 40,
+  reboundTailI: 0.41,
+  reboundTailS: 0.1,
+  wallMul: 0.8,
+  wallS: 0.1,
+  wallFloor: 0.2,
+  deathI: 1,
+  deathS: 0.23,
+};
+
+export const haptic: HapticFeel = { ...hapticDefaults };
+
+export function resetHaptic(): void {
+  Object.assign(haptic, hapticDefaults);
+}
+
 /** Catch radius added for the one peg a shot is clearly aimed at. 45 grows to 70. */
 export const AIM_EXTRA = 25;
 

@@ -1,4 +1,5 @@
-import { armMax, armSlack, feel, guides, resetFeel, type Feel } from './tune';
+import { refreshCharge } from './feelHaptics';
+import { armMax, armSlack, feel, guides, haptic, resetFeel, resetHaptic, type Feel, type HapticFeel } from './tune';
 
 type Row = {
   key: keyof Feel;
@@ -43,6 +44,63 @@ const groups: { title: string; rows: Row[] }[] = [
       { key: 'aimSpin', label: '瞄准转头', min: 0, max: 60, step: 0.5 },
       { key: 'catchSpin', label: '抓住转头', min: 0, max: 60, step: 0.5 },
       { key: 'settleSpin', label: '挂稳转头', min: 0, max: 60, step: 0.5 },
+    ],
+  },
+];
+
+const hapticGroups: { title: string; rows: { key: keyof HapticFeel; label: string; min: number; max: number; step: number }[] }[] = [
+  {
+    title: '蓄力震动',
+    rows: [
+      { key: 'tensionMinI', label: '最小强度', min: 0, max: 1, step: 0.01 },
+      { key: 'tensionMaxI', label: '最大强度', min: 0, max: 1, step: 0.01 },
+      { key: 'tensionMinS', label: '最小锐度', min: 0, max: 1, step: 0.01 },
+      { key: 'tensionMaxS', label: '最大锐度', min: 0, max: 1, step: 0.01 },
+      { key: 'grainAt', label: '碎抖起点', min: 0, max: 1, step: 0.01 },
+      { key: 'grainI', label: '碎抖强度', min: 0, max: 1, step: 0.01 },
+      { key: 'grainS', label: '碎抖锐度', min: 0, max: 1, step: 0.01 },
+      { key: 'grainHz', label: '碎抖频率', min: 4, max: 80, step: 1 },
+    ],
+  },
+  {
+    title: '抓住',
+    rows: [
+      { key: 'grabI', label: '瞬态强度', min: 0, max: 1, step: 0.01 },
+      { key: 'grabS', label: '瞬态锐度', min: 0, max: 1, step: 0.01 },
+      { key: 'grabTailI', label: '余韵强度', min: 0, max: 1, step: 0.01 },
+      { key: 'grabTailS', label: '余韵锐度', min: 0, max: 1, step: 0.01 },
+      { key: 'grabTailMs', label: '余韵时长', min: 0, max: 200, step: 1 },
+    ],
+  },
+  {
+    title: '回弹',
+    rows: [
+      { key: 'reboundGapMs', label: '间隙', min: 0, max: 200, step: 1 },
+      { key: 'reboundBase', label: '基础次数', min: 0, max: 12, step: 1 },
+      { key: 'reboundEnergy', label: '次数随力', min: 0, max: 8, step: 0.1 },
+      { key: 'reboundDamp', label: '衰减指数', min: 0, max: 12, step: 0.1 },
+      { key: 'reboundDampEnergy', label: '力减衰减', min: 0, max: 8, step: 0.1 },
+      { key: 'reboundS', label: '瞬态锐度', min: 0, max: 1, step: 0.01 },
+      { key: 'reboundSDrop', label: '锐度衰减', min: 0, max: 1, step: 0.01 },
+      { key: 'reboundFloor', label: '底噪', min: 0, max: 1, step: 0.01 },
+      { key: 'reboundTailMs', label: '余韵时长', min: 0, max: 200, step: 1 },
+      { key: 'reboundTailI', label: '强度比例', min: 0, max: 1, step: 0.01 },
+      { key: 'reboundTailS', label: '锐度比例', min: 0, max: 1, step: 0.01 },
+    ],
+  },
+  {
+    title: '撞墙震动',
+    rows: [
+      { key: 'wallMul', label: '强度倍数', min: 0, max: 1, step: 0.01 },
+      { key: 'wallS', label: '锐度', min: 0, max: 1, step: 0.01 },
+      { key: 'wallFloor', label: '最低强度', min: 0, max: 1, step: 0.01 },
+    ],
+  },
+  {
+    title: '死亡震动',
+    rows: [
+      { key: 'deathI', label: '强度', min: 0, max: 1, step: 0.01 },
+      { key: 'deathS', label: '锐度', min: 0, max: 1, step: 0.01 },
     ],
   },
 ];
@@ -93,8 +151,11 @@ export function mountTunePanel(root: HTMLElement): void {
     const slack = armSlack();
     derived.textContent = `松弛 ${slack.toFixed(1)} · 最长 ${armMax().toFixed(0)}`;
     for (const input of inputs) {
-      const key = input.dataset.key as keyof Feel;
-      const shown = input.dataset.armLength === '1' ? armMax() : feel[key];
+      const shown = input.dataset.armLength === '1'
+        ? armMax()
+        : input.dataset.haptic === '1'
+          ? haptic[input.dataset.key as keyof HapticFeel]
+          : feel[input.dataset.key as keyof Feel];
       input.value = String(shown);
       const out = input.parentElement?.querySelector('output');
       if (out) out.textContent = format(shown);
@@ -133,15 +194,52 @@ export function mountTunePanel(root: HTMLElement): void {
     body.append(block);
   }
 
+  for (const group of hapticGroups) {
+    const block = document.createElement('div');
+    block.className = 'tune-group';
+    const title = document.createElement('p');
+    title.textContent = group.title;
+    block.append(title);
+    for (const row of group.rows) {
+      const label = document.createElement('label');
+      const name = document.createElement('span');
+      name.textContent = row.label;
+      const out = document.createElement('output');
+      const input = document.createElement('input');
+      input.type = 'range';
+      input.min = String(row.min);
+      input.max = String(row.max);
+      input.step = String(row.step);
+      input.dataset.key = row.key;
+      input.dataset.haptic = '1';
+      input.value = String(haptic[row.key]);
+      input.addEventListener('input', () => {
+        haptic[row.key] = Number(input.value);
+        refresh();
+        refreshCharge();
+      });
+      inputs.push(input);
+      label.append(name, out, input);
+      block.append(label);
+    }
+    body.append(block);
+  }
+
   toggle.addEventListener('click', () => {
     panel.classList.toggle('closed');
   });
   reset.addEventListener('click', () => {
     resetFeel();
+    resetHaptic();
     refresh();
+    refreshCharge();
   });
   copy.addEventListener('click', () => {
-    const text = JSON.stringify({ ...feel, armSlack: armSlack(), armMax: armMax() }, null, 2);
+    const text = JSON.stringify(
+      { ...feel, armSlack: armSlack(), armMax: armMax(), haptic },
+      null,
+      2,
+    );
     void navigator.clipboard?.writeText(text);
     copy.textContent = '已复制';
     window.setTimeout(() => {

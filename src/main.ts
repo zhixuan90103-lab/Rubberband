@@ -36,6 +36,7 @@ import {
   tryBeginDrag,
   type SlingWorld,
 } from './game/sling';
+import { beginCharge, endCharge, playDeath, playGrab, playWall, updateCharge } from './game/feelHaptics';
 import { mountTunePanel } from './game/tunePanel';
 import {
   BODY_RADIUS,
@@ -1193,6 +1194,7 @@ function syncView(
       wallBurst = 0;
       wallHitX = flyVx < 0 ? SHAFT_LEFT : SHAFT_RIGHT;
       wallHitY = world.body.y;
+      playWall(power);
     }
     flyVx = world.body.vx;
     const flight = flightBall(world.body.vx, world.body.vy);
@@ -1396,12 +1398,16 @@ async function boot(): Promise<void> {
   let world: SlingWorld;
   let seed = 1;
   const grabSeen = { n: 0 };
+  let heardGrab = 0;
+  let wasFall = false;
   const retry = () => {
     const fromX = world.body.x;
     seed += 1;
     world = createWorld(mulberry32(seed));
     beginEnter(world, fromX);
     grabSeen.n = 0;
+    heardGrab = 0;
+    wasFall = false;
     wallBurst = -1;
     idleTime = 0;
     idleBlend = 0;
@@ -1478,24 +1484,28 @@ async function boot(): Promise<void> {
     if (!tryBeginDrag(world, point.x, point.y)) return;
     dragPointer = event.pointerId;
     dragTo(world, point.x, point.y);
+    beginCharge(pullLength(world) / Math.max(1, feel.maxPull));
     renderer.domElement.setPointerCapture(event.pointerId);
   });
 
   renderer.domElement.addEventListener('pointermove', (event) => {
     if (event.pointerId !== dragPointer) return;
     applyPointer(event);
+    updateCharge(pullLength(world) / Math.max(1, feel.maxPull));
   });
 
   renderer.domElement.addEventListener('pointerup', (event) => {
     if (event.pointerId !== dragPointer) return;
     applyPointer(event);
     endDrag(world);
+    endCharge();
     forgetPointer(event);
   });
 
   renderer.domElement.addEventListener('pointercancel', (event) => {
     if (event.pointerId !== dragPointer) return;
     cancelDrag(world);
+    endCharge();
     forgetPointer(event);
   });
 
@@ -1505,7 +1515,18 @@ async function boot(): Promise<void> {
     const frameDt = (now - last) / 1000;
     last = now;
     advance(world, frameDt);
-    death.setOpen(world.phase === 'fall');
+    if (world.grabPulse !== heardGrab) {
+      heardGrab = world.grabPulse;
+      if (world.catch) playGrab(world.catch.surge0);
+    }
+    if (world.phase !== 'drag') endCharge();
+    const falling = world.phase === 'fall';
+    if (falling && !wasFall) {
+      endCharge();
+      playDeath();
+    }
+    wasFall = falling;
+    death.setOpen(falling);
     syncView(
       frameDt,
       world,
