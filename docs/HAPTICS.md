@@ -2,7 +2,7 @@
 
 配套：[AGENTS.md](../AGENTS.md) · [ENGINEERING.md](./ENGINEERING.md) · [AUDIO.md](./AUDIO.md)
 
-> 插件接入按 **§0**。玩法四处震动在 **§8**，数字以 `src/game/tune.ts` 的 `hapticDefaults` 为准。  
+> 插件接入按 **§0**。马达概念在 **§9**。玩法六处震动在 **§8**，数字以 `src/game/tune.ts` 的 `hapticDefaults` 为准。  
 > 以前多次「没接上」，几乎都是 **只 sync、没 bootstrap**，或 **用 `prepare()` 当验收**。
 
 ## 0. 正确接入（照这个做）
@@ -139,8 +139,8 @@ void haptics.stopContinuous();
 
 | | 完整玩法工程 | 本壳 |
 |--|--------------|------|
-| 给玩法的 API | `gameHaptics.buttonTap()` / `pop()` / `stackImpact()` 等 **具名事件** | `haptics.impact()` / `playTransient()` 等 **插件原语** |
-| 参数与节流 | `HapticsConfig`：pattern 表、cooldown、碰撞门限 | 无；HUD 按钮直接打桥 |
+| 给玩法的 API | `gameHaptics.buttonTap()` / `pop()` / `stackImpact()` 等 **具名事件** | `feelHaptics.ts` 的六处函数。`haptics.ts` 只留插件原语 |
+| 参数与节流 | `HapticsConfig`：pattern 表、cooldown、碰撞门限 | `hapticDefaults`。蓄力 0.02 才过桥；摆动 120 ms 间隔 |
 | 开关 | 存档为唯一真值；所有发声口顶部检查 | 模块内一个 `enabled` 布尔 |
 | 插件 JS | 独立 `registerPlugin` + 桌面空实现 | 写在 `src/utils/haptics.ts` 里 |
 | `prepare()` | **空操作**。引擎在 Swift `load()` 已起 | Swift **没有** `prepare`；HUD 用 impact 验收，不调 prepare |
@@ -158,7 +158,7 @@ void haptics.stopContinuous();
 ## 2. 一次接对：五条硬约定
 
 1. **改 Swift 只改** `plugins/native-haptics/`，然后 **`npm run ios:bootstrap`**。不要只改 `ios/App/App/` 里的副本。
-2. **玩法禁止** `registerPlugin('AdvancedHaptics')` 和 `navigator.vibrate`。只走 `src/utils/haptics.ts`（或再包一层 `gameHaptics`）。
+2. **玩法禁止** `registerPlugin('AdvancedHaptics')` 和 `navigator.vibrate`。只走 `src/game/feelHaptics.ts`，由它调用 `src/utils/haptics.ts`。
 3. **不要依赖 JS `prepare()` 当初始化。** 原生 `load()` 已 `initEngine()`。回前台最多再点一次轻 `impact('soft')` 预热 UIKit，不是必须。
 4. **先确认插件已注册，再谈手感。** 真机状态应看到 `haptics ios: true`，且 `isPluginAvailable('AdvancedHaptics') === true`。
 5. **节奏在游戏层。** 插件只负责「震一下」。cooldown、具名 pattern、开关，仿音效 Catalog，不要塞进 Swift。
@@ -252,7 +252,7 @@ Swift `pluginMethods` **只有这些**。JS 多调一个就会 UNIMPLEMENTED。
 | 桌面按钮不震 | 不是 iOS App | 正常 |
 | 第一次轻、后面才正常 | UIKit generator 未 prepare；或 engine 刚 start | 可接受；`load()` 已 start engine。不要为此再发明 JS prepare 桥方法，除非 Swift 真加了 |
 | 连打卡顿 / 震成一片 | 每事件一次桥且无 cooldown | 玩法层节流，参考音效 Batcher 思路（震动通常不必批桥，但必须 cooldown） |
-| 设置关了还在震 | 业务直接调了插件 | 只保留 haptics.ts / gameHaptics 四个出口 |
+| 设置关了还在震 | 业务直接调了插件 | 玩法只从 `feelHaptics.ts` 发，经 `haptics.ts` |
 | 横屏或旋转后丢震 | 本壳锁竖屏；VC 必须是 Bridge | 不要换回默认 VC |
 
 ## 6. 和音效一起接
@@ -281,21 +281,55 @@ Swift `pluginMethods` **只有这些**。JS 多调一个就会 UNIMPLEMENTED。
 - 切后台再回前台仍能震（`resetHandler` 会再 start）
 - 连续点不会卡帧；加上 cooldown 后不会震糊
 
-玩法验收在真机上拉、抓、撞墙、掉落各走一遍。桌面听不到是正常的。四处的规则见 §8。
+玩法验收在真机上拉、抓、摆、撞墙、掉落、吃金币各走一遍。桌面听不到是正常的。规则见 §8。
 
 ## 8. 现行玩法震动
 
-五处。数字在 `hapticDefaults`。抓住是一条图案。摆动余韵跟着绳子端点，各自一次瞬态。
+六处，只从 `src/game/feelHaptics.ts` 发。`main.ts` 只在指针和阶段变化时调用，不直接打插件。数字只写在 `hapticDefaults`，面板改的是运行中的 `haptic`，恢复回到默认。调用 `void` 出去，不要 `await` 堵逻辑帧。
 
-| 时机 | 怎么响 | 停 |
+蓄力跟手走，每次变化过桥。抓住是一条图案，马达自己播完。摆动跟着绳子端点，每次端点单独一次瞬态，不写进抓住那条图案。
+
+| 时机 | 插件 | 怎么响 | 停 |
+|---|---|---|---|
+| 拉动蓄力 | `startContinuousHaptic`，随后 `updateContinuousHaptic` | `drag` 期间一条连续震动。强度、锐度在最小和最大之间，跟 `(reach - restDrop) / maxPull`。比例达到 `grainAt` 时另叠 `startGrainHaptic` | 松手、取消，或阶段离开 `drag`。连续震动淡出约 50 ms |
+| 抓住 | `playPattern` | 立刻一声瞬态，10 ms 后一条短连续余韵 | 下一次图案会停掉这一条 |
+| 摆动 | `playTransient` | 相对悬挂点的位移和速度点积换号时一声 | 再按，或这次抓住结束 |
+| 撞墙 | `playTransient` | 飞行中 `vx` 变号且来速大于 80 时一声 | 一次 |
+| 死亡 | `playTransient` | 进入 `fall` 一声。同一次坠落不重复 | 一次 |
+| 吃到金币 | `playTransient` | 每吃到一枚一声 | 一次 |
+
+力度：满拉来势约 2338 px/s 为 1。
+
+- 蓄力强度 = `tensionMinI + 拉比 × (tensionMaxI - tensionMinI)`，锐度同理用 `tensionMinS` / `tensionMaxS`。拉比变化不到 0.02 不过桥。
+- 抓住强度 = `grabI × (0.75 + 0.25 × 力度)`，锐度 = `grabS`。余韵强度同样乘这个比例，锐度 = `grabTailS`，时长 = `grabTailMs`。
+- 摆动强度 = `swingI × min(1, 摆幅 / swingFullPx)`，锐度 = `swingS`。摆幅小于 `swingMinPx`，或强度低于 `swingFloor`，不响。两次端点至少隔 120 ms。摆幅是身体相对悬挂点的距离。
+- 撞墙强度 = `wallMul × (|vx| - 80) / 1000`，锐度 = `wallS`。低于 `wallFloor` 不响。
+- 死亡用 `deathI`、`deathS`。金币用 `coinI`、`coinS`。
+
+## 9. 马达概念
+
+iPhone 的 Taptic Engine 没有左右方向。能写的是两种事件，再加两个旋钮。iPad 和模拟器没有这套马达。系统可以压过请求：进后台、来电、低电量、系统里关掉触感，都会停或不播。
+
+| 概念 | 含义 | 本项目怎么用 |
 |---|---|---|
-| 拉动蓄力 | `drag` 期间一条连续震动。强度、锐度在最小和最大之间，跟 `(reach - restDrop) / maxPull`。比例达到 `grainAt` 时另叠一层碎抖 | 松手、取消，或阶段离开 `drag`（含铆钉失效） |
-| 抓住 | 一条 `playPattern`：立刻一声瞬态，10 毫秒后一条短连续余韵 | 下一次图案会停掉这一条 |
-| 摆动 | 相对悬挂点的位移和速度点积换号时一声闷瞬态。摆幅小于 `swingMinPx`，或强度低于 `swingFloor`，不响 | 再按、坠落，或这次抓住结束 |
-| 撞墙 | 飞行中 `vx` 变号且来速大于 80 时一声。强度是 `wallMul × (|vx| - 80) / 1000`，低于 `wallFloor` 不响 | 一次 |
-| 死亡 | 进入 `fall` 一声，强度 `deathI`、锐度 `deathS`。同一次坠落不重复 | 一次 |
-| 吃到金币 | 每吃到一枚一声瞬态，强度 `coinI`、锐度 `coinS` | 一次 |
+| 瞬态 `hapticTransient` | 一下敲击。时长由系统定 | 抓住的第一下、摆动端点、撞墙、死亡、金币 |
+| 持续 `hapticContinuous` | 一串很快的敲击，必须给时长。单次最长 30 秒 | 蓄力床、碎抖、抓住后约 40 ms 的尾巴 |
+| 强度 | 0 弱，1 强。游戏里常留在 1 以下，满强度又硬又吵 | 蓄力大约 0.1–0.4，抓住大约 0.5 |
+| 锐度 | 0 圆、闷；1 脆、机械。差 0.3 以上才分得开。不是指定赫兹 | 抓住 0.5，尾巴和摆动更低 |
 
-满拉来势约 2338 px/s 算力度 1。抓住强度是 `grabI × (0.75 + 0.25 × 力度)`，锐度是 `grabS`。余韵强度同样乘这个比例，锐度是 `grabTailS`，时长是 `grabTailMs`。
+实时改一条正在响的持续震动，用动态参数，不要每帧新建图案：
 
-摆动强度是 `swingI × min(1, 摆幅 / swingFullPx)`，锐度是 `swingS`。两次端点至少隔 120 毫秒。
+- `hapticIntensityControl` 是乘数，0 到 1，只能把事件上的强度往下压。所以蓄力那条事件的强度写成 1。
+- `hapticSharpnessControl` 是加数，−1 到 1。事件锐度写成 1 时，目标锐度要减 1 再传。
+
+多条 player 会叠在一起。抓住用 `playPattern`，新的一条会停掉上一条。摆动、撞墙、金币用各自的瞬态 player，不掐掉抓住的图案。
+
+苹果公开的波形在 [apple/unityplugins](https://github.com/apple/unityplugins) 的 `SampleAHAPs`。和本项目有关的是：
+
+- `Bounce.ahap`：一下瞬态，10 ms 后一条更轻、更闷的短持续。抓住用这个结构，强度按连抓的手感缩小，不取文件里的满强度。
+- `Recharge.ahap`：一条写死的爬升。蓄力要跟手指，所以仍用 `sendParameters`，不播这条曲线。
+- Ricochet 的撞墙：轻重主要靠锐度，不靠把一下拉到满。小球锐度 0.5，大球锐度 0。
+
+弹簧球实验室的回弹是 6 Hz，因为那颗球自己以 6 Hz 振动。这边挂长 60 px、重力 4000 px/s²，单摆周期大约 0.77 秒。所以摆动不烤进抓住的图案，而在位移和速度的点积换号时各打一下。
+
+过桥：一次 Capacitor 调用大约零点几毫秒到十几毫秒。抓住、端点、撞墙各走一次，听不出来。蓄力每次变化都过桥，拉比不到 0.02 就丢掉。图案里的 10 ms 和 120 ms 是马达自己的时钟，发出去之后不再经过 JS。调用用 `void`，不要 `await`。引擎在插件 `load()` 里启动；`engine.start()` 会堵住当前这次调用，所以不要每震一次开关引擎。

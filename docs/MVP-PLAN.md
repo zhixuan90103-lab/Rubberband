@@ -10,7 +10,7 @@
 |---|---|
 | `src/game/tune.ts` | `feel`、`haptic` 和默认值。松弛长度、最长、钉位由 `feel` 算出 |
 | `src/game/tunePanel.ts` | `#ui-root` 上的参数面板。写 `feel` 和 `haptic`，恢复默认 |
-| `src/game/feelHaptics.ts` | 蓄力、抓住、回弹、撞墙、死亡。规则在 [HAPTICS.md](./HAPTICS.md) §8 |
+| `src/game/feelHaptics.ts` | 蓄力、抓住、摆动、撞墙、死亡、金币。规则在 [HAPTICS.md](./HAPTICS.md) §8 |
 | `src/game/pegs.ts` | 钉的种类、计时、一行怎么摆、镜头窗口。槽位不在这里增减 |
 | `src/game/coins.ts` | 金币池、间隔、摆进行距、向上才拾取 |
 | `src/game/sim.ts` | Rapier 2D。重力、抓住和飞行的积分、左右墙 |
@@ -46,4 +46,4 @@ npx tsx src/game/selftest.ts
 - 移动钉、旋转钉、飞行钉。
 - 弹回上一颗钉。左右墙的反弹已经有了。
 - 看不清的死亡线、锯、火、碾压。
-- 音效、角色差异、瞄准箭头。松手时的隐形瞄准辅助已经有了，见 [PHYSICS-PLAN.md](./PHYSICS-PLAN.md)「瞄准辅助」。金币已接，见同一份文档「金币」。五处震动已接，见 [HAPTICS.md](./HAPTICS.md) §8。
+- 音效、角色差异、瞄准箭头。松手时的隐形瞄准辅助已经有了，见 [PHYSICS-PLAN.md](./PHYSICS-PLAN.md)「瞄准辅助」。金币已接，见同一份文档「金币」。六处震动已接，见 [HAPTICS.md](./HAPTICS.md) §8。

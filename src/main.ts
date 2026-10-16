@@ -40,6 +40,8 @@ import {
   type SlingWorld,
 } from './game/sling';
 import { beginCharge, endCharge, endSwing, noteSwing, playCoin, playDeath, playGrab, playWall, updateCharge } from './game/feelHaptics';
+import { audio } from './audio/AudioManager';
+import { playCoinSfx, playDeathSfx, playGrabSfx, playLaunchSfx, stopPullSfx, updatePullSfx } from './utils/gameSfx';
 import { mountTunePanel } from './game/tunePanel';
 import {
   BODY_RADIUS,
@@ -1660,6 +1662,7 @@ async function boot(): Promise<void> {
     grabSeen.n = 0;
     heardGrab = 0;
     wasFall = false;
+    stopPullSfx();
     wallBurst = -1;
     idleTime = 0;
     idleBlend = 0;
@@ -1671,6 +1674,7 @@ async function boot(): Promise<void> {
   const native = Capacitor.isNativePlatform();
 
   await initPhysics();
+  void audio.preload();
   world = createWorld(mulberry32(seed));
   const renderer = await createRenderer({ container: stage });
   renderer.domElement.style.pointerEvents = 'auto';
@@ -1731,6 +1735,7 @@ async function boot(): Promise<void> {
   };
 
   renderer.domElement.addEventListener('pointerdown', (event) => {
+    audio.unlock();
     if (dragPointer !== null) return;
     const design = designPoint(event);
     if (!design) return;
@@ -1755,6 +1760,8 @@ async function boot(): Promise<void> {
     applyPointer(event);
     endDrag(world);
     endCharge();
+    stopPullSfx();
+    if (world.phase === 'launch') playLaunchSfx();
     forgetPointer(event);
   });
 
@@ -1772,10 +1779,16 @@ async function boot(): Promise<void> {
     last = now;
     const coinsBefore = world.coinsGot;
     advance(world, frameDt);
-    for (let n = coinsBefore; n < world.coinsGot; n += 1) playCoin();
+    for (let n = coinsBefore; n < world.coinsGot; n += 1) {
+      playCoin();
+      playCoinSfx();
+    }
     if (world.grabPulse !== heardGrab) {
       heardGrab = world.grabPulse;
-      if (world.catch) playGrab(world.catch.surge0);
+      if (world.catch) {
+        playGrab(world.catch.surge0);
+        playGrabSfx();
+      }
     }
     if (world.phase === 'drag' || !world.catch) {
       endSwing();
@@ -1791,11 +1804,19 @@ async function boot(): Promise<void> {
         );
       }
     }
-    if (world.phase !== 'drag') endCharge();
+    if (world.phase === 'drag') {
+      const pulled = pullLength(world) / Math.max(1, feel.maxPull);
+      if (pulled > 0.08) updatePullSfx(Math.min(1, pulled));
+      else stopPullSfx();
+    } else {
+      stopPullSfx();
+      endCharge();
+    }
     const falling = world.phase === 'fall';
     if (falling && !wasFall) {
       endCharge();
       playDeath();
+      playDeathSfx();
     }
     wasFall = falling;
     death.setOpen(falling);

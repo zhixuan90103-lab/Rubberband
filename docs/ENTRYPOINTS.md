@@ -24,7 +24,7 @@ index.html
        → 指针：#stage 盒子 → 设计坐标 → pointerToWorld → tryBeginDrag / dragTo / endDrag
 ```
 
-震动玩法在 `src/game/feelHaptics.ts`，经 `src/utils/haptics.ts` 进原生插件。参数在 `tune.ts` 的 `haptic`。真机接入见 [HAPTICS.md](./HAPTICS.md) §0，四处规则见 §8。拉射页没有单独的「点我震动」按钮。
+震动玩法在 `src/game/feelHaptics.ts`，经 `src/utils/haptics.ts` 进原生插件。参数在 `tune.ts` 的 `haptic`。真机接入见 [HAPTICS.md](./HAPTICS.md) §0，六处规则见 §8。拉射页没有单独的「点我震动」按钮。
 
 ## 3. DOM
 

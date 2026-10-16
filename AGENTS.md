@@ -20,7 +20,7 @@
 | 震动 JS | `src/utils/haptics.ts` |
 | 玩法震动 | `src/game/feelHaptics.ts` · `tune.ts` 的 `hapticDefaults` |
 | 震动 Swift 真源 | `plugins/native-haptics/*` |
-| 震动怎么接 | `docs/HAPTICS.md` **§0 接入** · **§8 四处规则** |
+| 震动怎么接 | `docs/HAPTICS.md` **§0 接入** · **§8 六处规则** · **§9 概念** |
 | Capacitor | `capacitor.config.ts`（`contentInset: never`） |
 | 构建 | `vite.config.ts`（**`base: './'`**） |
 | iOS 注入 | `scripts/bootstrap-ios.mjs` |
