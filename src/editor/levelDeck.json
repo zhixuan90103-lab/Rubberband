@@ -1,0 +1,372 @@
+{
+  "version": 1,
+  "openingId": "opening",
+  "deckIds": [
+    "card-rise"
+  ],
+  "cards": [
+    {
+      "id": "opening",
+      "name": "开局",
+      "kind": "opening",
+      "weight": 1,
+      "tags": [],
+      "pegs": [
+        {
+          "id": "op-green",
+          "x": 195,
+          "y": 598,
+          "color": "green"
+        },
+        {
+          "id": "op-blue",
+          "x": 195,
+          "y": 258,
+          "color": "blue"
+        },
+        {
+          "id": "peg-mv9cgu9e-2",
+          "x": 98,
+          "y": 269,
+          "color": "blue"
+        },
+        {
+          "id": "peg-mv9cgxko-3",
+          "x": 293,
+          "y": 269,
+          "color": "blue"
+        }
+      ],
+      "coins": []
+    },
+    {
+      "id": "card-rise",
+      "name": "简单1",
+      "kind": "normal",
+      "weight": 1,
+      "tags": [],
+      "pegs": [
+        {
+          "id": "rise-high",
+          "x": 279,
+          "y": 440,
+          "color": "blue"
+        },
+        {
+          "id": "peg-mv9da7e3-2",
+          "x": 110,
+          "y": 700,
+          "color": "red"
+        },
+        {
+          "id": "peg-mvag0y8m-5",
+          "x": 120,
+          "y": 75,
+          "color": "blue"
+        }
+      ],
+      "coins": []
+    },
+    {
+      "id": "card-mvag01h8-2",
+      "name": "简单2",
+      "kind": "normal",
+      "weight": 1,
+      "tags": [],
+      "pegs": [
+        {
+          "id": "peg-mvag01h8-3",
+          "x": 95,
+          "y": 345,
+          "color": "blue"
+        },
+        {
+          "id": "peg-mvag01h8-4",
+          "x": 263,
+          "y": 599,
+          "color": "red"
+        },
+        {
+          "id": "peg-mvag2yrb-6",
+          "x": 208,
+          "y": 36,
+          "color": "blue"
+        }
+      ],
+      "coins": [
+        {
+          "id": "coin-mvag8p8c-o",
+          "x": 217,
+          "y": 130
+        }
+      ]
+    },
+    {
+      "id": "card-mvag3ber-7",
+      "name": "简单3",
+      "kind": "normal",
+      "weight": 1,
+      "tags": [],
+      "pegs": [
+        {
+          "id": "peg-mvag3ber-8",
+          "x": 113,
+          "y": 658,
+          "color": "blue"
+        },
+        {
+          "id": "peg-mvag3ber-9",
+          "x": 304,
+          "y": 372,
+          "color": "blue"
+        },
+        {
+          "id": "peg-mvag3vi1-a",
+          "x": 188,
+          "y": 69,
+          "color": "blue"
+        }
+      ],
+      "coins": [
+        {
+          "id": "coin-mvag8b5d-n",
+          "x": 154,
+          "y": 350
+        }
+      ]
+    },
+    {
+      "id": "card-mvag5ghd-b",
+      "name": "双钉1",
+      "kind": "normal",
+      "weight": 1,
+      "tags": [],
+      "pegs": [
+        {
+          "id": "peg-mvag5ghd-c",
+          "x": 98,
+          "y": 603,
+          "color": "blue"
+        },
+        {
+          "id": "peg-mvag5ghd-d",
+          "x": 293,
+          "y": 603,
+          "color": "blue"
+        },
+        {
+          "id": "peg-mvag5y1f-e",
+          "x": 195,
+          "y": 245,
+          "color": "blue"
+        }
+      ],
+      "coins": []
+    },
+    {
+      "id": "card-mvag6yp7-f",
+      "name": "双钉2",
+      "kind": "normal",
+      "weight": 1,
+      "tags": [],
+      "pegs": [
+        {
+          "id": "peg-mvag6yp7-g",
+          "x": 195,
+          "y": 655,
+          "color": "blue"
+        },
+        {
+          "id": "peg-mvag6yp7-h",
+          "x": 188,
+          "y": 87,
+          "color": "blue"
+        },
+        {
+          "id": "peg-mvag7b8n-i",
+          "x": 98,
+          "y": 411,
+          "color": "blue"
+        },
+        {
+          "id": "peg-mvag7cb0-j",
+          "x": 293,
+          "y": 411,
+          "color": "blue"
+        }
+      ],
+      "coins": [
+        {
+          "id": "coin-mvag818v-m",
+          "x": 195,
+          "y": 487
+        },
+        {
+          "id": "coin-mvagd2ce-10",
+          "x": 192,
+          "y": 212
+        }
+      ]
+    },
+    {
+      "id": "card-mvag94rn-p",
+      "name": "双钉3",
+      "kind": "normal",
+      "weight": 1,
+      "tags": [],
+      "pegs": [
+        {
+          "id": "peg-mvag9e3h-s",
+          "x": 98,
+          "y": 661,
+          "color": "red"
+        },
+        {
+          "id": "peg-mvag9go9-u",
+          "x": 289,
+          "y": 392,
+          "color": "red"
+        },
+        {
+          "id": "peg-mvag9hdg-v",
+          "x": 97,
+          "y": 106,
+          "color": "red"
+        }
+      ],
+      "coins": [
+        {
+          "id": "coin-mvagavwm-y",
+          "x": 95,
+          "y": 526
+        },
+        {
+          "id": "coin-mvagb2vs-z",
+          "x": 99,
+          "y": 282
+        }
+      ]
+    },
+    {
+      "id": "card-mvagdzsj-11",
+      "name": "随机1",
+      "kind": "normal",
+      "weight": 1,
+      "tags": [],
+      "pegs": [
+        {
+          "id": "peg-mvagebmb-15",
+          "x": 298,
+          "y": 527,
+          "color": "blue"
+        },
+        {
+          "id": "peg-mvageczq-16",
+          "x": 93,
+          "y": 357,
+          "color": "blue"
+        },
+        {
+          "id": "peg-mvagfort-19",
+          "x": 108,
+          "y": 693,
+          "color": "red"
+        },
+        {
+          "id": "peg-mvagg45g-1a",
+          "x": 267,
+          "y": 137,
+          "color": "red"
+        }
+      ],
+      "coins": [
+        {
+          "id": "coin-mvageokw-17",
+          "x": 166,
+          "y": 485
+        },
+        {
+          "id": "coin-mvagepky-18",
+          "x": 216,
+          "y": 319
+        }
+      ]
+    },
+    {
+      "id": "card-mvaivm90-2",
+      "name": "衔接1",
+      "kind": "normal",
+      "weight": 1,
+      "tags": [],
+      "pegs": [
+        {
+          "id": "peg-mvaivm90-3",
+          "x": 245,
+          "y": 92,
+          "color": "blue"
+        },
+        {
+          "id": "peg-mvaivm90-4",
+          "x": 195,
+          "y": 761,
+          "color": "blue"
+        },
+        {
+          "id": "peg-mvaiwhq7-5",
+          "x": 125,
+          "y": 435,
+          "color": "red"
+        }
+      ],
+      "coins": [
+        {
+          "id": "coin-mvajhnen-2",
+          "x": 155,
+          "y": 594
+        }
+      ]
+    },
+    {
+      "id": "card-mvaixh0c-2",
+      "name": "衔接2",
+      "kind": "normal",
+      "weight": 1,
+      "tags": [],
+      "pegs": [
+        {
+          "id": "peg-mvaixh0c-3",
+          "x": 191,
+          "y": 713,
+          "color": "blue"
+        },
+        {
+          "id": "peg-mvaixh0c-4",
+          "x": 192,
+          "y": 93,
+          "color": "blue"
+        },
+        {
+          "id": "peg-mvaixycg-5",
+          "x": 89,
+          "y": 467,
+          "color": "blue"
+        },
+        {
+          "id": "peg-mvaixzuf-6",
+          "x": 300,
+          "y": 369,
+          "color": "blue"
+        }
+      ],
+      "coins": [
+        {
+          "id": "coin-mvajigo1-3",
+          "x": 247,
+          "y": 231
+        }
+      ]
+    }
+  ],
+  "openingPlaced": true,
+  "viewFit": 1
+}

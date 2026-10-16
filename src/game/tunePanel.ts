@@ -103,6 +103,13 @@ const hapticGroups: { title: string; rows: { key: keyof HapticFeel; label: strin
       { key: 'deathS', label: '锐度', min: 0, max: 1, step: 0.01 },
     ],
   },
+  {
+    title: '金币震动',
+    rows: [
+      { key: 'coinI', label: '强度', min: 0, max: 1, step: 0.01 },
+      { key: 'coinS', label: '锐度', min: 0, max: 1, step: 0.01 },
+    ],
+  },
 ];
 
 function format(value: number): string {

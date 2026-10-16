@@ -7,13 +7,13 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   base: './',
   server: {
-    host: true,
-    port: 5190,
+    host: '127.0.0.1',
+    port: 5207,
     strictPort: true,
   },
   preview: {
-    host: true,
-    port: 5190,
+    host: '127.0.0.1',
+    port: 5207,
     strictPort: true,
   },
   build: {

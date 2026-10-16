@@ -58,7 +58,8 @@ export function tickCoins(
   cameraY: number,
 ): number {
   let got = 0;
-  const flying = phase === 'launch' || phase === 'fly';
+  const pulling = phase === 'drag' || phase === 'return';
+  const rising = (phase === 'launch' || phase === 'fly') && vy < 0;
   const floor = cameraY + DESIGN_HEIGHT + 80;
   for (const coin of coins) {
     if (!coin.live) continue;
@@ -72,7 +73,7 @@ export function tickCoins(
       coin.live = false;
       continue;
     }
-    if (!flying || vy >= 0) continue;
+    if (!pulling && !rising) continue;
     if (Math.hypot(coin.x - x, coin.y - y) > COIN_PICKUP + BODY_RADIUS) continue;
     coin.taken = true;
     coin.pop = 0;

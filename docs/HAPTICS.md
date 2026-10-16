@@ -285,7 +285,7 @@ Swift `pluginMethods` **只有这些**。JS 多调一个就会 UNIMPLEMENTED。
 
 ## 8. 现行玩法震动
 
-四处。数字在 `hapticDefaults`。回弹算法对齐弹簧球的 Decay：一条图案里排好，不按物理换向再开播放器。
+五处。数字在 `hapticDefaults`。回弹算法对齐弹簧球的 Decay：一条图案里排好，不按物理换向再开播放器。
 
 | 时机 | 怎么响 | 停 |
 |---|---|---|
@@ -294,6 +294,7 @@ Swift `pluginMethods` **只有这些**。JS 多调一个就会 UNIMPLEMENTED。
 | 抓住后的回弹 | 和抓住放在同一条 `playPattern` 里 | 下一次图案会停掉这一条 |
 | 撞墙 | 飞行中 `vx` 变号且来速大于 80 时一声。强度是 `wallMul × (|vx| - 80) / 1000`，低于 `wallFloor` 不响 | 一次 |
 | 死亡 | 进入 `fall` 一声，强度 `deathI`、锐度 `deathS`。同一次坠落不重复 | 一次 |
+| 吃到金币 | 每吃到一枚一声瞬态，强度 `coinI`、锐度 `coinS` | 一次 |
 
 满拉来势约 2338 px/s 算回弹力度 1，小于此按比例。回弹：
 

@@ -16,8 +16,10 @@ import {
 } from './adapt/design';
 import {
   mountDevicePreview,
+  shouldUseDevicePreview,
   type DevicePreviewController,
 } from './adapt/devicePreview';
+import { mountLevelEditor } from './editor/levelEditor';
 import { applyNativeClass, applySafeAreaCssVars } from './adapt/safeArea';
 import { createRenderer } from './create-renderer';
 import { COIN_FLY, COIN_POOL } from './game/coins';
@@ -37,7 +39,7 @@ import {
   tryBeginDrag,
   type SlingWorld,
 } from './game/sling';
-import { beginCharge, endCharge, playDeath, playGrab, playWall, updateCharge } from './game/feelHaptics';
+import { beginCharge, endCharge, playCoin, playDeath, playGrab, playWall, updateCharge } from './game/feelHaptics';
 import { mountTunePanel } from './game/tunePanel';
 import {
   BODY_RADIUS,
@@ -158,7 +160,7 @@ const FACE_H = 223;
 const ARM_TEX_W = 143;
 const ARM_TEX_H = 130;
 
-function bootScene(): {
+function bootScene(world: SlingWorld): {
   scene: THREE.Scene;
   camera: THREE.OrthographicCamera;
   actor: THREE.Group;
@@ -182,7 +184,9 @@ function bootScene(): {
   const backdrop = new THREE.Group();
   const jungle = mountJungle(backdrop);
   scene.add(backdrop);
-  scene.add(mountTitle());
+  const title = mountTitle();
+  placeTitle(title, world);
+  scene.add(title);
 
   const pegRoot = new THREE.Group();
   scene.add(pegRoot);
@@ -839,9 +843,22 @@ const TITLE_H = TITLE_W * (437 / 800);
 function mountTitle(): THREE.Mesh {
   const title = artSprite(titleUrl, TITLE_W, TITLE_H);
   title.renderOrder = -2;
-  // Bottom edge sits a little below the birth peg. +y is down.
-  title.position.set(DESIGN_WIDTH / 2, PEG_LOWER_Y - TITLE_H / 2 + 36, -0.9);
+  title.position.set(DESIGN_WIDTH / 2, PEG_LOWER_Y, -0.9);
   return title;
+}
+
+/** Center the title in the gap between the green peg and the blue peg above it. */
+function placeTitle(title: THREE.Mesh, world: SlingWorld): void {
+  const green = world.pegs.find((peg) => peg.live && peg.kind === 'green');
+  const blues = world.pegs.filter((peg) => peg.live && peg.kind === 'blue' && green && peg.y < green.y);
+  const blue = blues.reduce<typeof blues[number] | undefined>((best, peg) => {
+    if (!green) return peg;
+    if (!best) return peg;
+    return Math.abs(peg.x - green.x) < Math.abs(best.x - green.x) ? peg : best;
+  }, undefined);
+  if (!green || !blue) return;
+  // +y is down. The bottom of the title overlaps the green peg by a short margin.
+  title.position.set((green.x + blue.x) / 2, green.y - TITLE_H / 2 + 36, -0.9);
 }
 
 function mountJungle(backdrop: THREE.Group): THREE.Texture {
@@ -1627,6 +1644,8 @@ function syncView(
 }
 
 async function boot(): Promise<void> {
+  const switcher = document.getElementById('device-switcher');
+  if (switcher && shouldUseDevicePreview()) mountLevelEditor(switcher);
   const ui = document.getElementById('ui-root');
   let world: SlingWorld;
   let seed = 1;
@@ -1656,7 +1675,7 @@ async function boot(): Promise<void> {
   const renderer = await createRenderer({ container: stage });
   renderer.domElement.style.pointerEvents = 'auto';
 
-  const { scene, camera, actor, eyes, feet, actorShadow, arms, flash, center, pegRoot, backdrop, jungle, aimLine, wallRing } = bootScene();
+  const { scene, camera, actor, eyes, feet, actorShadow, arms, flash, center, pegRoot, backdrop, jungle, aimLine, wallRing } = bootScene(world);
   const pegViews = createPegViewPool(pegRoot);
   const coinViews = Array.from({ length: COIN_POOL }, () => {
     const view = makeCoinView();
@@ -1751,7 +1770,9 @@ async function boot(): Promise<void> {
     const now = performance.now();
     const frameDt = (now - last) / 1000;
     last = now;
+    const coinsBefore = world.coinsGot;
     advance(world, frameDt);
+    for (let n = coinsBefore; n < world.coinsGot; n += 1) playCoin();
     if (world.grabPulse !== heardGrab) {
       heardGrab = world.grabPulse;
       if (world.catch) playGrab(world.catch.surge0);

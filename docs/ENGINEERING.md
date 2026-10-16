@@ -14,7 +14,7 @@ portrait-webgpu-base/
 ├── README.md
 ├── docs/
 ├── index.html
-├── vite.config.ts          # base: './' · port 5190
+├── vite.config.ts          # base: './' · 127.0.0.1:5207
 ├── capacitor.config.ts     # contentInset never · scrollEnabled false
 ├── src/
 │   ├── main.ts             # 场景、手臂、指针
@@ -38,7 +38,7 @@ portrait-webgpu-base/
 |----|-----|------|
 | `base` | `'./'` | Capacitor 相对路径 |
 | `outDir` | `dist` | = webDir |
-| `port` | `5190` | 固定端口 |
+| `port` | `5207` | 只绑 `127.0.0.1`，和编辑器是同一个源 |
 | `target` | `es2022` | WebGPU |
 
 ### Capacitor

@@ -28,6 +28,7 @@
 | 现行物理和默认数 | `src/game/tune.ts` · `docs/PHYSICS-PLAN.md` |
 | 调参面板 | `src/game/tunePanel.ts` |
 | 发射、抓住、转角、钉场 | `src/game/sling.ts` · `src/game/pegs.ts` · `docs/PHYSICS-PLAN.md` |
+| 关卡卡组 | `src/editor/` · `src/game/deckRun.ts` · `docs/LEVEL-EDITOR.md` |
 | 金币 | `src/game/coins.ts` · `docs/PHYSICS-PLAN.md`「金币」 |
 | 拉射做了什么 | `docs/MVP-PLAN.md` · `src/game/sling.ts` |
 | 物理分工 | `docs/PHYSICS-PLAN.md` |
@@ -56,7 +57,7 @@
 
 ```bash
 npm install
-npm run dev           # http://127.0.0.1:5190/
+npm run dev           # http://127.0.0.1:5207/
 npm run build
 npm run cap:sync
 npm run ios:bootstrap # 首次 / 修插件

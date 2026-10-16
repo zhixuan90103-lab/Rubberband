@@ -1,29 +1,25 @@
 /**
- * Peg rows. The opening is one green birth peg, then one centered blue peg.
- * Later rows are a blue pair or one single,
- * with a wide gap so a hang shows this row and the next one. A single may be red.
+ * Peg rows. The editor opening card is placed by the world.
+ * After that the climb is procedural: short singles, then pairs and a long
+ * step, then a two-peg choice whose coin marks only one landing.
  * Slots come from a fixed pool and are moved, not constructed again.
  */
 
 import { DESIGN_HEIGHT, DESIGN_WIDTH } from '../adapt/design';
 import {
   BLUE_PEG_LIFE,
+  CLIMB_EARLY,
+  CLIMB_MID,
   PEG_FILL_LEAD,
-  PEG_GAP_MAX,
-  PEG_GAP_MIN,
   PEG_JUMP_MAX,
   PEG_JUMP_MIN,
+  hangRise,
   PEG_INVALID,
   PEG_KEEP_BELOW,
-  PEG_LANES,
   PEG_LOWER_Y,
   PEG_OPEN_SINGLE_GAP,
   PEG_POOL,
-  PEG_ROW_STAGGER,
-  PEG_SINGLE_X0,
-  PEG_SINGLE_X1,
   PEG_WARN,
-  RED_PEG_CHANCE,
   RED_PEG_LIFE,
   SHAFT_CENTER,
 } from './tune';
@@ -89,19 +85,41 @@ export type PegSpot = { x: number; y: number; kind: PegKind };
 /** Opening is a two-step stage machine. Later rows remember shape, not an index. */
 export type RowStage = 'start' | 'opening' | 'run';
 
+/** Kept so a saved row cursor still parses. The climb no longer samples card shapes. */
+export type RowPattern = 'none' | 'side' | 'emergency' | 'redCoin' | 'longClimb';
+
 export type RowMemory = {
   stage: RowStage;
   pair: boolean;
   lane: number;
   singleX: number;
   lowSide: number;
+  pattern: RowPattern;
+  /** Steps left in the current pattern, including the one about to be placed. 0 means sample again. */
+  step: number;
+  /** 1 puts the next alternating peg on the right. */
+  side: number;
+  /** How far the lower peg of this row sits below the row cursor. */
+  span: number;
 };
 
 export function freshRowMemory(): RowMemory {
-  return { stage: 'start', pair: false, lane: -1, singleX: SHAFT_CENTER, lowSide: 1 };
+  return {
+    stage: 'start',
+    pair: false,
+    lane: -1,
+    singleX: SHAFT_CENTER,
+    lowSide: 1,
+    pattern: 'none',
+    step: 0,
+    side: 1,
+    span: 0,
+  };
 }
 
-export type RowPlan = { spots: PegSpot[]; memory: RowMemory };
+export type RowCoin = { x: number; y: number };
+
+export type RowPlan = { spots: PegSpot[]; memory: RowMemory; coins: RowCoin[] };
 
 /**
  * Live nails occupy the camera window. Fill until a row sits PEG_FILL_LEAD
@@ -133,73 +151,187 @@ export function pegInView(peg: Peg, band: PegBand): boolean {
   return peg.live && peg.y >= band.viewTop && peg.y <= band.viewBottom;
 }
 
+function blankRun(prev: RowMemory): RowMemory {
+  return {
+    stage: 'run',
+    pair: false,
+    lane: prev.lane,
+    singleX: prev.singleX,
+    lowSide: prev.lowSide,
+    pattern: prev.pattern,
+    step: prev.step,
+    side: prev.side,
+    span: prev.span,
+  };
+}
+
+function sourceXs(prev: RowMemory): number[] {
+  if (!prev.pair) return [prev.singleX];
+  const right = prev.singleX === prev.lane ? DESIGN_WIDTH - prev.lane : prev.singleX;
+  return [prev.lane, right];
+}
+
+/** Pull a step onto every source peg: above the row band, inside hangRise, distance 200–600. */
+function fitStep(prev: RowMemory, x: number, desired: number): { x: number; rise: number } {
+  const pad = prev.span;
+  const limit = Math.max(48, hangRise() - pad);
+  let rise = Math.min(Math.max(desired, 48), limit);
+  const sources = sourceXs(prev);
+  const anchor = sources.reduce((best, ax) => (Math.abs(ax - x) < Math.abs(best - x) ? ax : best));
+  for (let n = 0; n < 8; n += 1) {
+    const far = Math.max(...sources.map((ax) => Math.hypot(ax - x, rise + pad)));
+    const near = Math.min(...sources.map((ax) => Math.hypot(ax - x, rise)));
+    if (far > PEG_JUMP_MAX) rise -= far - PEG_JUMP_MAX;
+    if (near < PEG_JUMP_MIN && rise < limit - 8) rise += Math.min(limit - rise, PEG_JUMP_MIN - near);
+    else if (near < PEG_JUMP_MIN) x += Math.sign(anchor - x || 1) * 14;
+    rise = Math.min(limit, Math.max(48, rise));
+    x = Math.min(278, Math.max(112, x));
+  }
+  return { x, rise };
+}
+
+/** Coin sits well along the flight to one peg, clear of the other landing. */
+function coinToward(prev: RowMemory, prevY: number, x: number, y: number): RowCoin {
+  const sources = sourceXs(prev);
+  const anchor = sources.reduce((best, ax) => (Math.abs(ax - x) < Math.abs(best - x) ? ax : best));
+  return { x: anchor + (x - anchor) * 0.72, y: prevY + (y - prevY) * 0.72 };
+}
+
+function clampX(x: number): number {
+  return Math.min(278, Math.max(112, x));
+}
+
+/** Anywhere on the other half of the shaft, at least 70 px from the last peg. */
+function offsetX(from: number, rng: Rng): number {
+  const side = from <= SHAFT_CENTER ? 1 : -1;
+  const inner = SHAFT_CENTER + side * 28;
+  const outer = side > 0 ? 278 : 112;
+  let x = inner + (outer - inner) * rng();
+  if (Math.abs(x - from) < 70) x = from + side * (70 + rng() * (side > 0 ? 278 - from - 70 : from - 112 - 70));
+  x = clampX(x);
+  if (Math.sign(x - SHAFT_CENTER) !== side) x = clampX(SHAFT_CENTER + side * (36 + rng() * 90));
+  return x;
+}
+
+function keptOffset(fit: { x: number; rise: number }, aim: number): { x: number; rise: number } {
+  if (Math.sign(fit.x - SHAFT_CENTER) === Math.sign(aim - SHAFT_CENTER)) return fit;
+  return { x: aim, rise: fit.rise };
+}
+
+type ClimbPhase = 'early' | 'mid' | 'late';
+
+function climbPhase(prevY: number): ClimbPhase {
+  const climbed = PEG_LOWER_Y - prevY;
+  if (climbed < CLIMB_EARLY) return 'early';
+  if (climbed < CLIMB_MID) return 'mid';
+  return 'late';
+}
+
+function rememberSingle(memory: RowMemory, x: number, side: number): RowMemory {
+  return { ...memory, pair: false, singleX: x, lane: x, pattern: 'none', step: 0, side, span: 0 };
+}
+
 /**
- * Birth, then the centered opening blue peg, then procedural rows.
+ * Birth, then the centered opening blue peg, then one sampled card-style at a time.
+ * Styles come from the saved cards. Coordinates are not copied.
  * Stage lives on memory so a hole in the chain never replays row 0.
  */
 export function planNextRow(prevY: number, rng: Rng, prev: RowMemory): RowPlan {
   if (prev.stage === 'start') {
     return {
       spots: [{ x: SHAFT_CENTER, y: PEG_LOWER_Y, kind: 'green' }],
-      memory: { stage: 'opening', pair: false, lane: -1, singleX: SHAFT_CENTER, lowSide: 1 },
+      memory: { ...freshRowMemory(), stage: 'opening', singleX: SHAFT_CENTER },
+      coins: [],
     };
   }
   if (prev.stage === 'opening') {
     return {
-      spots: [{ x: SHAFT_CENTER, y: prevY - PEG_OPEN_SINGLE_GAP, kind: 'blue' }],
-      memory: { ...prev, stage: 'run' },
+      spots: [{ x: SHAFT_CENTER, y: prevY - Math.min(PEG_OPEN_SINGLE_GAP, hangRise()), kind: 'blue' }],
+      memory: { ...prev, stage: 'run', pattern: 'none', step: 0, singleX: SHAFT_CENTER, pair: false },
+      coins: [],
     };
   }
-  let pair = rng() < 0.5;
-  if (pair === prev.pair && rng() < 0.7) pair = !pair;
-  const prevXs = prev.pair ? [prev.lane, DESIGN_WIDTH - prev.lane] : [prev.singleX];
-  let nextXs = prevXs;
-  let lane = prev.lane;
-  let singleX = prev.singleX;
-  if (pair) {
-    lane = PEG_LANES[Math.floor(rng() * PEG_LANES.length)];
-    if (lane === prev.lane) {
-      const at = PEG_LANES.findIndex((item) => item === lane);
-      lane = PEG_LANES[(at + 1) % PEG_LANES.length];
-    }
-    nextXs = [lane, DESIGN_WIDTH - lane];
-  } else {
-    singleX = PEG_SINGLE_X0 + rng() * (PEG_SINGLE_X1 - PEG_SINGLE_X0);
-    if (Math.abs(singleX - prev.singleX) < 36) singleX = DESIGN_WIDTH - singleX;
-    nextXs = [singleX];
+  const memory = blankRun(prev);
+  const phase = climbPhase(prevY);
+  if (phase === 'early') return earlyStep(prevY, rng, memory);
+  const roll = rng();
+  if (phase === 'mid') {
+    if (roll < 0.22) return longStep(prevY, rng, memory);
+    if (roll < 0.62) return choiceStep(prevY, rng, memory, false);
+    return singleStep(prevY, rng, memory, 200, 300);
   }
-  let gap = PEG_GAP_MIN + rng() * (PEG_GAP_MAX - PEG_GAP_MIN);
-  const stagger = PEG_ROW_STAGGER * 1.3;
-  let nearest = Infinity;
-  let farthest = 0;
-  for (const ax of prevXs) {
-    for (const bx of nextXs) {
-      const dx = Math.abs(ax - bx);
-      nearest = Math.min(nearest, Math.hypot(dx, Math.max(0, gap - stagger)));
-      farthest = Math.max(farthest, Math.hypot(dx, gap + stagger));
-    }
-  }
-  if (farthest > PEG_JUMP_MAX) gap -= farthest - PEG_JUMP_MAX;
-  if (nearest < PEG_JUMP_MIN) gap += PEG_JUMP_MIN - nearest;
-  gap = Math.max(PEG_JUMP_MIN, Math.min(PEG_JUMP_MAX, gap));
-  const y = prevY - gap;
-  if (pair) {
-    const drop = PEG_ROW_STAGGER * (0.7 + rng() * 0.6);
-    const lowSide = prev.lowSide > 0 && rng() < 0.75 ? -1 : 1;
-    const leftDrop = lowSide > 0 ? drop : 0;
-    const rightDrop = lowSide > 0 ? 0 : drop;
-    return {
-      spots: [
-        { x: lane, y: y + leftDrop, kind: 'blue' },
-        { x: DESIGN_WIDTH - lane, y: y + rightDrop, kind: 'blue' },
-      ],
-      memory: { stage: 'run', pair: true, lane, singleX: prev.singleX, lowSide },
-    };
-  }
-  const kind: PegKind = rng() < RED_PEG_CHANCE ? 'red' : 'blue';
+  return choiceStep(prevY, rng, memory, true);
+}
+
+/** Early: one short peg. Side offset is a fresh roll, and some pegs are red. */
+function earlyStep(prevY: number, rng: Rng, memory: RowMemory): RowPlan {
+  const sources = sourceXs(memory);
+  const from = sources.reduce((sum, x) => sum + x, 0) / sources.length;
+  const aim = offsetX(from, rng);
+  const fit = keptOffset(fitStep(memory, aim, 200 + rng() * 70), aim);
+  const y = prevY - fit.rise;
+  const kind = rng() < 0.34 ? 'red' : 'blue';
+  const side = fit.x < SHAFT_CENTER ? -1 : 1;
   return {
-    spots: [{ x: singleX, y, kind }],
-    memory: { stage: 'run', pair: false, lane: prev.lane, singleX, lowSide: prev.lowSide },
+    spots: [{ x: fit.x, y, kind }],
+    memory: rememberSingle(memory, fit.x, side),
+    coins: [],
+  };
+}
+
+/** One peg, a short sideways step, no second landing and no coin. */
+function singleStep(prevY: number, rng: Rng, memory: RowMemory, riseMin: number, riseMax: number): RowPlan {
+  const sources = sourceXs(memory);
+  const from = sources.reduce((sum, x) => sum + x, 0) / sources.length;
+  const aim = offsetX(from, rng);
+  const fit = keptOffset(fitStep(memory, aim, riseMin + rng() * (riseMax - riseMin)), aim);
+  const y = prevY - fit.rise;
+  const side = fit.x < SHAFT_CENTER ? -1 : 1;
+  return {
+    spots: [{ x: fit.x, y, kind: 'blue' }],
+    memory: rememberSingle(memory, fit.x, side),
+    coins: [],
+  };
+}
+
+/** One peg near the top of the visible hang. Still a single landing. */
+function longStep(prevY: number, rng: Rng, memory: RowMemory): RowPlan {
+  const cap = Math.max(260, hangRise() - 10);
+  return singleStep(prevY, rng, memory, cap - 18, cap);
+}
+
+/**
+ * Two catchable pegs. The coin lies on the way to the farther, higher one.
+ * Reaching either peg grabs it. Aiming the other peg misses the coin.
+ */
+function choiceStep(prevY: number, rng: Rng, memory: RowMemory, late: boolean): RowPlan {
+  const baitSide = rng() < 0.5 ? 1 : -1;
+  const safeX = clampX(SHAFT_CENTER - baitSide * (28 + rng() * 110));
+  const baitX = clampX(SHAFT_CENTER + baitSide * (28 + rng() * 110));
+  const rise = 200 + rng() * (late ? 80 : 60);
+  const safe = fitStep(memory, safeX, rise);
+  const bait = fitStep(memory, baitX, rise + 10 + rng() * 26);
+  const safeY = prevY - safe.rise;
+  const baitY = prevY - bait.rise;
+  const left = safe.x < bait.x ? safe.x : bait.x;
+  const right = safe.x < bait.x ? bait.x : safe.x;
+  const span = Math.abs(safeY - baitY);
+  return {
+    spots: [
+      { x: safe.x, y: safeY, kind: 'blue' },
+      { x: bait.x, y: baitY, kind: !late && rng() < 0.5 ? 'red' : 'blue' },
+    ],
+    memory: {
+      ...memory,
+      pair: true,
+      lane: left,
+      singleX: right,
+      pattern: 'none',
+      step: 0,
+      side: baitSide,
+      span,
+    },
+    coins: [coinToward(memory, prevY, bait.x, baitY)],
   };
 }
 

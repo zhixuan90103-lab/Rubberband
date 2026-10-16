@@ -2,7 +2,7 @@ import { freshRowMemory, mulberry32, pegBand, pegInView, PEG_PARK_Y, planNextRow
 import { initPhysics, simWrite } from './sim';
 import { beginEnter, cancelDrag, createWorld, dragTo, endDrag, pointerToWorld, readAim, stepWorld, tryBeginDrag } from './sling';
 import { DESIGN_HEIGHT } from '../adapt/design';
-import { AIM_EXTRA, armMax, armSlack, BLUE_PEG_LIFE, BODY_RADIUS, feel, PEG_JUMP_MAX, PEG_JUMP_MIN, PEG_LOWER_Y, PEG_OPEN_SINGLE_GAP, PEG_POOL, SHAFT_CENTER, SHAFT_LEFT, SHAFT_RIGHT } from './tune';
+import { AIM_EXTRA, armMax, armSlack, BLUE_PEG_LIFE, BODY_RADIUS, CLIMB_EARLY, CLIMB_MID, feel, hangRise, PEG_JUMP_MAX, PEG_JUMP_MIN, PEG_LOWER_Y, PEG_POOL, SHAFT_CENTER, SHAFT_LEFT, SHAFT_RIGHT } from './tune';
 
 function shortestSpin(delta: number): number {
   const tau = Math.PI * 2;
@@ -28,10 +28,12 @@ assert(
   world.pegs.filter((peg) => peg.live && Math.abs(peg.y - world.pegs[0].y) < 80).length === 1,
   'the birth peg has no neighbours on its row',
 );
-const openingSingle = world.pegs.find(
-  (peg) => peg.live && Math.abs(peg.y - (world.pegs[0].y - PEG_OPEN_SINGLE_GAP)) < 0.5,
+const openingBlues = world.pegs.filter((peg) => peg.live && peg.kind === 'blue' && peg.y < world.pegs[0].y);
+assert(openingBlues.length >= 3, 'the editor opening card places its blue pegs');
+assert(
+  openingBlues.some((peg) => Math.abs(peg.x - SHAFT_CENTER) < 1),
+  'the opening card has a centered blue peg',
 );
-assert(openingSingle?.kind === 'blue' && openingSingle.x === SHAFT_CENTER, 'the first peg above the birth peg is centered and blue');
 const visible = world.pegs.filter(
   (peg) => peg.live && peg.y >= world.cameraY && peg.y <= world.cameraY + DESIGN_HEIGHT,
 );
@@ -59,6 +61,9 @@ endDrag(world);
 
 assert(tryBeginDrag(world, world.body.x, world.body.y), 'press again');
 const peg = world.pegs[0];
+const openingSingle = world.pegs.find(
+  (item) => item.live && item.kind === 'blue' && Math.abs(item.x - peg.x) < 1 && item.y < peg.y,
+);
 dragTo(world, peg.x, world.body.y + feel.maxPull);
 const aimed = readAim(world);
 assert(aimed.points.length > 8, 'the aim curve follows the flight');
@@ -307,38 +312,43 @@ assert(flatSpun < 1.2, 'a catch that barely swings the rope does not play a full
 assert(Math.abs(shortestSpin(flat.body.spin)) < 0.25, 'a catch that barely swings still ends crown-up');
 
 const look = createWorld(mulberry32(10));
-const centerPeg = look.pegs[0];
 look.phase = 'fall';
-look.cameraY = centerPeg.y - 2400;
+look.cameraY = look.pegs[0].y - 2400;
 for (let i = 0; i < 20; i += 1) stepWorld(look, 1 / 60);
-const leftPeg = look.pegs.find((peg) => peg.live && peg.x < SHAFT_CENTER - 40);
-const rightPeg = look.pegs.find((peg) => peg.live && peg.x > SHAFT_CENTER + 40);
-if (!leftPeg || !rightPeg) throw new Error('side pegs missing');
+const centerPeg = look.pegs.find((peg) => peg.live && Math.abs(peg.x - SHAFT_CENTER) < 36);
+const liveLook = look.pegs.filter((peg) => peg.live);
+const leftPeg = liveLook.reduce((best, peg) => (peg.x < best.x ? peg : best));
+const rightPeg = liveLook.reduce((best, peg) => (peg.x > best.x ? peg : best));
+if (!centerPeg || !leftPeg || !rightPeg) throw new Error('side pegs missing');
+const wallPeg = liveLook.find((peg) => peg.id !== centerPeg.id) ?? leftPeg;
+if (wallPeg.id === centerPeg.id) throw new Error('side pegs missing');
+wallPeg.x = SHAFT_CENTER - 110;
 look.phase = 'drag';
 look.heldId = centerPeg.id;
 look.body.x = centerPeg.x - 80;
 for (let i = 0; i < 40; i += 1) stepWorld(look, 1 / 60);
 assert(Math.abs(look.cameraX) < 0.5, 'a peg in the center band does not shift the camera');
 
-look.heldId = leftPeg.id;
-look.body.x = leftPeg.x;
-look.body.y = leftPeg.y + feel.restDrop;
+look.heldId = wallPeg.id;
+look.body.x = wallPeg.x;
+look.body.y = wallPeg.y + feel.restDrop;
 look.phase = 'hang';
 for (let i = 0; i < 20; i += 1) stepWorld(look, 1 / 60);
 assert(Math.abs(look.cameraX) < 0.5, 'hanging on the left peg does not shift the camera');
 
 look.phase = 'drag';
-look.body.x = leftPeg.x + 50;
+look.body.x = wallPeg.x + 50;
 for (let i = 0; i < 40; i += 1) stepWorld(look, 1 / 60);
 assert(Math.abs(look.cameraX) < 0.5, 'pulling inward from the left peg does not shift the camera');
 
-look.body.x = leftPeg.x - 80;
+look.body.x = wallPeg.x - 80;
 for (let i = 0; i < 50; i += 1) stepWorld(look, 1 / 60);
 assert(look.cameraX < -4, 'pulling from the left peg toward the wall shifts the camera');
 
 look.phase = 'fly';
-look.heldId = rightPeg.id;
-look.body.x = rightPeg.x + 40;
+wallPeg.x = SHAFT_CENTER + 110;
+look.heldId = wallPeg.id;
+look.body.x = wallPeg.x + 40;
 for (let i = 0; i < 90; i += 1) stepWorld(look, 1 / 60);
 assert(Math.abs(look.cameraX) < 0.5, 'flight does not keep a sideways camera shift');
 
@@ -416,7 +426,8 @@ assert(
 
 const ranged = createWorld(mulberry32(12));
 const band = pegBand(ranged.cameraY);
-const stray = ranged.pegs.find((peg) => peg.live && peg.id !== ranged.heldId);
+const heldPeg = ranged.pegs.find((peg) => peg.id === ranged.heldId);
+const stray = ranged.pegs.find((peg) => peg.live && heldPeg && peg.id !== heldPeg.id && heldPeg.y - peg.y > hangRise());
 if (!stray) throw new Error('a peg to push out of range is missing');
 stray.y = band.keepBottom + 40;
 stepWorld(ranged, 1 / 60);
@@ -425,7 +436,8 @@ assert(stray.y === PEG_PARK_Y, 'a recycled slot parks off the field');
 
 const sky = createWorld(mulberry32(16));
 const skyBand = pegBand(sky.cameraY);
-const far = sky.pegs.find((peg) => peg.live && peg.id !== sky.heldId);
+const skyHeld = sky.pegs.find((peg) => peg.id === sky.heldId);
+const far = sky.pegs.find((peg) => peg.live && skyHeld && peg.id !== skyHeld.id && skyHeld.y - peg.y > hangRise());
 if (!far) throw new Error('a peg to push above the camera is missing');
 far.y = skyBand.keepTop - 40;
 stepWorld(sky, 1 / 60);
@@ -466,27 +478,95 @@ for (let index = 1; index < 40; index += 1) {
     for (const to of plan.spots) {
       const distance = Math.hypot(from.x - to.x, from.y - to.y);
       assert(distance >= PEG_JUMP_MIN - 1 && distance <= PEG_JUMP_MAX + 1, `row gap ${distance.toFixed(0)} is outside 200 to 600`);
+      assert(from.y - to.y <= hangRise() + 1, `row rise ${(from.y - to.y).toFixed(0)} leaves the screen`);
     }
   }
   for (const spot of plan.spots) {
     assert(spot.x >= bodyMin - 1 && spot.x <= bodyMax + 1, `peg x ${spot.x.toFixed(0)} is too close to a wall to pull`);
+  }
+  const climbed = PEG_LOWER_Y - rowY;
+  if (rowMemory.stage === 'run' && climbed < CLIMB_EARLY) {
+    assert(plan.spots.length === 1 && plan.coins.length === 0, 'early climb is one peg and no coin choice');
+    assert(rowY - plan.spots[0].y <= hangRise() + 1, 'early rise stays on screen');
+  }
+  if (rowMemory.stage === 'run' && climbed >= CLIMB_MID) {
+    assert(plan.spots.length === 2 && plan.coins.length === 1, 'late climb is a two-peg choice with one coin');
+    const safe = plan.spots[0];
+    const bait = plan.spots[1];
+    const coin = plan.coins[0];
+    if (!safe || !bait || !coin) throw new Error('a late choice has two pegs and a coin');
+    assert(
+      Math.hypot(coin.x - bait.x, coin.y - bait.y) + 8 < Math.hypot(coin.x - safe.x, coin.y - safe.y),
+      'the coin sits toward one peg',
+    );
   }
   rowMemory = plan.memory;
   rowY = Math.min(...plan.spots.map((spot) => spot.y));
   previous = plan.spots;
 }
 
+let earlyRed = 0;
+let earlyMinX = 999;
+let earlyMaxX = 0;
+for (let seed = 1; seed <= 6; seed += 1) {
+  const rng = mulberry32(seed);
+  let memory = freshRowMemory();
+  let y = PEG_LOWER_Y;
+  const opened = planNextRow(y, rng, memory);
+  memory = opened.memory;
+  y = opened.spots[0].y;
+  const second = planNextRow(y, rng, memory);
+  memory = second.memory;
+  y = second.spots[0].y;
+  let prevX = second.spots[0]?.x ?? SHAFT_CENTER;
+  for (let n = 0; n < 8 && PEG_LOWER_Y - y < CLIMB_EARLY; n += 1) {
+    const plan = planNextRow(y, rng, memory);
+    const spot = plan.spots[0];
+    if (!spot) throw new Error('early peg missing');
+    const prevHalf = Math.sign(prevX - SHAFT_CENTER);
+    const half = Math.sign(spot.x - SHAFT_CENTER);
+    assert(half !== 0 && half !== prevHalf, 'early pegs do not stack on one side');
+    assert(Math.abs(spot.x - prevX) >= 60, 'each early peg offsets from the last');
+    if (spot.kind === 'red') earlyRed += 1;
+    earlyMinX = Math.min(earlyMinX, spot.x);
+    earlyMaxX = Math.max(earlyMaxX, spot.x);
+    prevX = spot.x;
+    memory = plan.memory;
+    y = spot.y;
+  }
+}
+let midRed = 0;
+for (let seed = 1; seed <= 8; seed += 1) {
+  const rng = mulberry32(seed + 40);
+  let memory = freshRowMemory();
+  let y = PEG_LOWER_Y - CLIMB_EARLY - 40;
+  memory = { ...memory, stage: 'run', pattern: 'none', step: 0 };
+  for (let n = 0; n < 12 && PEG_LOWER_Y - y < CLIMB_MID; n += 1) {
+    const plan = planNextRow(y, rng, memory);
+    if (plan.spots.length === 2 && plan.spots.some((spot) => spot.kind === 'red')) midRed += 1;
+    memory = plan.memory;
+    y = Math.min(...plan.spots.map((spot) => spot.y));
+  }
+}
+assert(midRed >= 1, 'a mid coin peg can be red');
+assert(earlyRed >= 1, 'early climb includes a red peg');
+assert(earlyMaxX - earlyMinX >= 70, 'early pegs do not share one x');
+
 const purse = createWorld(mulberry32(21));
 for (const coin of purse.coins) coin.live = false;
+for (const peg of purse.pegs) {
+  if (peg.live && peg.id !== purse.heldId) releasePeg(peg);
+}
 const beforeTop = Math.min(...purse.pegs.filter((peg) => peg.live).map((peg) => peg.y));
+purse.rowY = beforeTop;
 purse.jumpsUntilCoin = 1;
 purse.phase = 'fall';
-purse.cameraY = beforeTop - 900;
+purse.cameraY = beforeTop - CLIMB_MID - 1200;
 stepWorld(purse, 1 / 60);
 const spawned = purse.coins.find((coin) => coin.live);
 if (!spawned) throw new Error('a row plants its coin before anyone flies there');
 assert(spawned.y < beforeTop, 'the coin sits above the rows that were already there');
-assert(purse.jumpsUntilCoin >= 1 && purse.jumpsUntilCoin <= 5, 'the gap rolls again');
+assert(purse.jumpsUntilCoin === 1, 'a choice coin does not roll a separate gap');
 const gapBefore = purse.jumpsUntilCoin;
 purse.phase = 'fly';
 purse.leftId = -1;
@@ -507,6 +587,22 @@ purse.body.vy = -200;
 simWrite(purse.sim, purse.body.x, purse.body.y, 0, -200);
 stepWorld(purse, 1 / 60);
 assert(purse.coinsGot === 1 && spawned.taken, 'an upward flight picks the coin up');
+
+const dragCoin = createWorld(mulberry32(22));
+for (const coin of dragCoin.coins) coin.live = false;
+const slot = dragCoin.coins[0];
+if (!slot) throw new Error('the coin pool is empty');
+slot.live = true;
+slot.taken = false;
+slot.x = dragCoin.body.x;
+slot.y = dragCoin.body.y + 120;
+dragCoin.phase = 'drag';
+dragCoin.body.vy = 80;
+stepWorld(dragCoin, 1 / 60);
+assert(!slot.taken, 'a drag that has not reached the coin leaves it');
+slot.y = dragCoin.body.y;
+stepWorld(dragCoin, 1 / 60);
+assert(dragCoin.coinsGot === 1 && slot.taken, 'a drag on the coin picks it up and starts the flight');
 
 const climb = createWorld(mulberry32(4));
 climb.phase = 'fall';

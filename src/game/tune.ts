@@ -1,6 +1,6 @@
 /** Design-pixel feel constants. Not measured from the original game. */
 
-import { DESIGN_WIDTH } from '../adapt/design';
+import { DESIGN_HEIGHT, DESIGN_WIDTH } from '../adapt/design';
 
 /** Live monkey feel. The panel writes this. Derived lengths are functions. */
 export type Feel = {
@@ -99,38 +99,43 @@ export type HapticFeel = {
   wallFloor: number;
   deathI: number;
   deathS: number;
+  /** One transient when a coin is collected. */
+  coinI: number;
+  coinS: number;
 };
 
 export const hapticDefaults: HapticFeel = {
   tensionMinI: 0.1,
-  tensionMaxI: 0.3,
+  tensionMaxI: 0.4,
   tensionMinS: 0.1,
-  tensionMaxS: 0.3,
+  tensionMaxS: 0.2,
   grainAt: 0.6,
   grainI: 0.3,
   grainS: 0,
-  grainHz: 35,
-  grabI: 0.4,
-  grabS: 0.26,
+  grainHz: 25,
+  grabI: 0.36,
+  grabS: 0.31,
   grabTailI: 0,
   grabTailS: 0,
   grabTailMs: 0,
-  reboundGapMs: 50,
-  reboundBase: 3,
-  reboundEnergy: 2,
-  reboundDamp: 6,
-  reboundDampEnergy: 3,
-  reboundS: 0.11,
-  reboundSDrop: 0.39,
-  reboundFloor: 0.25,
-  reboundTailMs: 40,
-  reboundTailI: 0.34,
-  reboundTailS: 0.1,
+  reboundGapMs: 10,
+  reboundBase: 2,
+  reboundEnergy: 2.1,
+  reboundDamp: 5.1,
+  reboundDampEnergy: 5,
+  reboundS: 0.15,
+  reboundSDrop: 0.6,
+  reboundFloor: 0.18,
+  reboundTailMs: 20,
+  reboundTailI: 0.29,
+  reboundTailS: 0.09,
   wallMul: 0.8,
   wallS: 0.1,
   wallFloor: 0.2,
   deathI: 1,
   deathS: 0.23,
+  coinI: 0.3,
+  coinS: 0.3,
 };
 
 export const haptic: HapticFeel = { ...hapticDefaults };
@@ -195,13 +200,29 @@ export const PEG_LANES = [110, 124] as const;
 /** Jump from one row to the next stays inside this distance. */
 export const PEG_JUMP_MIN = 200;
 export const PEG_JUMP_MAX = 600;
+/**
+ * Top leaves cover about this many design pixels. A peg center above this
+ * line is on the canvas and still hidden. While hanging, the next peg stays
+ * below it: body at pegAnchor, peg restDrop above the body.
+ */
+export const HANG_LEAF = 200;
+export function hangRise(): number {
+  return DESIGN_HEIGHT * feel.pegAnchor - feel.restDrop - HANG_LEAF;
+}
 /** How far the two pegs of one row sit apart in height. */
 export const PEG_ROW_STAGGER = 22;
-/** First peg above the birth cluster. Far enough that the next row stays off screen. */
-export const PEG_OPEN_SINGLE_GAP = 400;
-/** Later rows pick a gap in this range. Two of these do not fit above a hang. */
-export const PEG_GAP_MIN = 360;
-export const PEG_GAP_MAX = 460;
+/** First peg above the birth cluster. Short enough to sit below the top leaves. */
+export const PEG_OPEN_SINGLE_GAP = 300;
+/** Later rows pick a gap in this range. The whole step stays below the top leaves. */
+export const PEG_GAP_MIN = 240;
+export const PEG_GAP_MAX = 320;
+/**
+ * Climb height above the foot peg. Early stays a short single peg.
+ * Mid adds pairs and an occasional long single. After that every step is a
+ * two-peg choice, and the coin sits only on the way to one of them.
+ */
+export const CLIMB_EARLY = 2800;
+export const CLIMB_MID = 7200;
 /** A single sits somewhere in this band, not on a fixed center step. */
 export const PEG_SINGLE_X0 = 120;
 export const PEG_SINGLE_X1 = 270;
@@ -231,6 +252,16 @@ export const LEG_DROP = (208 / FACE_H - 0.5) * HEAD_H;
 export const PEG_LOWER_Y = feelDefaults.restDrop + LEG_DROP;
 /** How often a single peg after the opening is red. Pairs stay blue. */
 export const RED_PEG_CHANCE = 0.18;
+/**
+ * 红点金币 zigzag from the saved cards 红点金币1/2/3.
+ * Three red pegs, alternating the left spot near x=120 and the right spot
+ * near x=275. Each rise stays on screen. A coin sits on the midpoint.
+ */
+export const RED_COIN_STEPS = 3;
+export const RED_COIN_X = [120, 275] as const;
+export const RED_COIN_DY_MIN = 220;
+export const RED_COIN_DY_MAX = 280;
+/** 红点金币 is one sampled pattern, not a side chance on ordinary rows. */
 /** Seconds before a blue or red peg turns gray and cannot be grabbed. */
 export const BLUE_PEG_LIFE = 5;
 export const RED_PEG_LIFE = 3;

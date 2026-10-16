@@ -9,6 +9,8 @@
  */
 
 /** Radians per second added for each px/s of velocity change in a wall hit. */
+import { openingCardPegs, type LevelCard } from '../editor/levelModel';
+import { loadPlayDeck, pullDeckCard, startDeck, type DeckPlay } from './deckRun';
 import { createCoinPool, nextCoinGap, placeCoin, tickCoins, type Coin } from './coins';
 import {
   beginPegCooldown,
@@ -35,8 +37,10 @@ import {
   type Sim,
 } from './sim';
 import {
+  PEG_LOWER_Y,
   armMax,
   armSlack,
+
   BODY_RADIUS,
   DRAG_BLOCK_Y,
   AIM_EXTRA,
@@ -136,6 +140,8 @@ export type SlingWorld = {
   jumpsUntilCoin: number;
   coinsGot: number;
   rng: Rng;
+  /** Shuffled editor cards above the opening. Null keeps the procedural rows. */
+  deck: DeckPlay | null;
   sim: Sim;
   catch: Catch | null;
   /** Set at release. The contraction follows cos(ω t) and lets go at slack. */
@@ -181,10 +187,89 @@ function pegReserved(world: SlingWorld, peg: Peg): boolean {
   return peg.id === world.heldId || peg.id === world.leftId;
 }
 
-/** Move free slots onto the next row. The pool size never changes. */
+/** Editor opening card. The green peg sits on the feet. Other pegs keep the card's offsets. */
+function placeOpeningCard(world: SlingWorld): void {
+  const pegs = openingCardPegs();
+  const green = pegs.find((peg) => peg.color === 'green') ?? pegs[0];
+  if (!green) {
+    placeNextRow(world);
+    return;
+  }
+  const origin = PEG_LOWER_Y - green.y;
+  let topX = green.x;
+  let topY = Number.POSITIVE_INFINITY;
+  for (const spot of pegs) {
+    const peg = claimPeg(world.pegs);
+    if (!peg) break;
+    peg.x = spot.x;
+    peg.y = origin + spot.y;
+    peg.kind = spot.color;
+    peg.age = 0;
+    peg.cool = 0;
+    if (peg.y < topY) {
+      topY = peg.y;
+      topX = peg.x;
+    }
+  }
+  world.rowY = topY;
+  world.rowMemory = {
+    ...freshRowMemory(),
+    stage: 'run',
+    pair: false,
+    singleX: topX,
+    pattern: 'none',
+    step: 0,
+  };
+  const doc = loadPlayDeck();
+  const opening = doc?.cards.find((card) => card.id === doc.openingId);
+  if (doc && opening) world.deck = startDeck(doc, opening, origin, world.rng);
+}
+
+/** Place the next deck card. A full pool puts the draw back. */
+function placeNextCard(world: SlingWorld): boolean {
+  const play = world.deck;
+  if (!play) return placeNextRow(world);
+  const saved: DeckPlay = {
+    ...play,
+    bag: play.bag.slice(),
+    pending: play.pending.slice(),
+  };
+  const card = pullDeckCard(play, world.rng);
+  if (!card) return false;
+  if (!stampCard(world, card, play.lastTop)) {
+    play.bag = saved.bag;
+    play.pending = saved.pending;
+    play.last = saved.last;
+    play.lastTop = saved.lastTop;
+    play.nextTop = saved.nextTop;
+    return false;
+  }
+  return true;
+}
+
+function stampCard(world: SlingWorld, card: LevelCard, top: number): boolean {
+  const spots = card.pegs.filter((peg) => peg.color !== 'green');
+  const claimed: Peg[] = [];
+  for (const spot of spots) {
+    const peg = claimPeg(world.pegs);
+    if (!peg) {
+      for (const taken of claimed) releasePeg(taken);
+      return false;
+    }
+    claimed.push(peg);
+    peg.x = spot.x;
+    peg.y = top + spot.y;
+    peg.kind = spot.color;
+    peg.age = 0;
+    peg.cool = 0;
+  }
+  for (const coin of card.coins) placeCoin(world.coins, coin.x, top + coin.y, 0);
+  if (claimed.length > 0) world.rowY = Math.min(...claimed.map((peg) => peg.y));
+  return true;
+}
+
+/** Place the next generated step. A full pool leaves the pattern step unadvanced. */
 function placeNextRow(world: SlingWorld): boolean {
-  const seeding = world.rowMemory.stage === 'start';
-  const fromY = world.rowY;
   const plan = planNextRow(world.rowY, world.rng, world.rowMemory);
   const spots = plan.spots;
   const claimed: Peg[] = [];
@@ -208,15 +293,7 @@ function placeNextRow(world: SlingWorld): boolean {
   const rowY = Math.min(...spots.map((spot) => spot.y));
   world.rowY = rowY;
   world.rowMemory = plan.memory;
-  if (!seeding) {
-    world.jumpsUntilCoin -= 1;
-    if (world.jumpsUntilCoin <= 0) {
-      const x = spots.reduce((sum, spot) => sum + spot.x, 0) / spots.length;
-      const placed = placeCoin(world.coins, x, (fromY + rowY) / 2, 0);
-      // Gap comes from the row itself, so the peg random stream stays put.
-      world.jumpsUntilCoin = placed ? 3 + (Math.abs(Math.round(x)) % 3) : 1;
-    }
-  }
+  for (const coin of plan.coins) placeCoin(world.coins, coin.x, coin.y, 0);
   return true;
 }
 
@@ -240,6 +317,14 @@ function evictBelowView(world: SlingWorld, band: PegBand): boolean {
  */
 function refillPegs(world: SlingWorld): void {
   const band = pegBand(world.cameraY);
+  // One stamped card can rise most of a screen above the peg that triggered
+  // the fill. The procedural keep is only one jump, so that top peg was
+  // released on the next tick. Hold a full card above the fill line.
+  if (world.deck) band.keepTop -= DESIGN_HEIGHT;
+  // Packed cards put the next peg within one visible climb of the current
+  // highest exit. That sits inside the procedural keep (one full jump above
+  // the fill line). Holding an extra screen used to fill the 24-slot pool
+  // and stop the tower while the cursor kept moving upward.
   for (const peg of world.pegs) {
     if (!peg.live || pegReserved(world, peg)) continue;
     if (peg.y < band.keepTop || peg.y > band.keepBottom) releasePeg(peg);
@@ -255,7 +340,7 @@ function refillPegs(world: SlingWorld): void {
   for (let n = 0; n < world.pegs.length * 2; n += 1) {
     const head = highest(world);
     if (head && head.y <= band.fillTop) break;
-    if (placeNextRow(world)) continue;
+    if ((world.deck ? placeNextCard(world) : placeNextRow(world))) continue;
     if (!evictBelowView(world, band)) break;
   }
 }
@@ -479,10 +564,11 @@ export function createWorld(rng: Rng): SlingWorld {
     jumpsUntilCoin: nextCoinGap(rng),
     coinsGot: 0,
     rng,
+    deck: null,
     sim: createSim(0, 0),
   };
-  placeNextRow(world);
-  const origin = world.pegs[0];
+  placeOpeningCard(world);
+  const origin = world.pegs.find((peg) => peg.live && peg.kind === 'green') ?? world.pegs[0];
   world.heldId = origin.id;
   world.body.x = origin.x;
   world.body.y = origin.y + feel.restDrop;

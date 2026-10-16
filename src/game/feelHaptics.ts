@@ -164,3 +164,8 @@ export function playWall(power: number): void {
 export function playDeath(): void {
   void haptics.playTransient(clamp01(haptic.deathI), clamp01(haptic.deathS));
 }
+
+/** One transient per coin collected. */
+export function playCoin(): void {
+  void haptics.playTransient(clamp01(haptic.coinI), clamp01(haptic.coinS));
+}
