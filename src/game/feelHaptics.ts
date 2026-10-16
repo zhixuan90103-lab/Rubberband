@@ -1,7 +1,7 @@
 /**
  * Gameplay haptics. Patterns follow the SpringBall lab:
  * a live continuous tension while pulling, grain near full stretch,
- * a grab hit, then rebound beats timed to the body's shake.
+ * a grab hit plus a short tail, then a dull tap at each swing extreme.
  * Wall and death are a single transient.
  */
 
@@ -89,13 +89,15 @@ export function endCharge(): void {
 
 /**
  * Catch haptics.
- * 1. The grab is one transient plus an optional continuous tail. Fixed.
- * 2. The rebound is SpringBall's decay pattern. Count, envelope, sharpness
- *    and the tail ratio all follow that lab. Beats sit on one pattern at 6 Hz.
+ * The grab is one pattern: a transient, then a continuous tail 10 ms later.
+ * Swing taps follow the rope. A sign change of offset·velocity is an extreme.
  */
 const FULL_CATCH = 2338;
-/** SpringBall's default bounce rate. One beat every 1/6 second. */
-const REBOUND_HZ = 6;
+const SWING_GAP_S = 0.12;
+
+let swingOn = false;
+let swingDot = 0;
+let swingAt = 0;
 
 function pulse(
   events: HapticEvent[],
@@ -123,31 +125,51 @@ function pulse(
   }
 }
 
+/** Stop swing taps. A press, a fall, or the catch ending calls this. */
+export function endSwing(): void {
+  swingOn = false;
+}
+
 /**
- * Grab hit, then SpringBall's decay. `speed` is arrival speed. A full pull
- * is about 2338 px/s and counts as energy 1.
+ * Grab hit plus the Bounce tail. `speed` is arrival speed. A full pull is
+ * about 2338 px/s. Light catches stay quieter, but still read as a catch.
  */
 export function playGrab(speed: number): void {
+  swingOn = true;
+  swingDot = 0;
+  swingAt = 0;
   const energy = clamp01(speed / FULL_CATCH);
+  const scale = 0.75 + 0.25 * energy;
   const events: HapticEvent[] = [];
-  pulse(events, 0, haptic.grabI, haptic.grabS, haptic.grabTailI, haptic.grabTailS, haptic.grabTailMs);
-  const total = Math.max(0, Math.round(haptic.reboundBase + energy * haptic.reboundEnergy));
-  const dampingExp = haptic.reboundDamp - energy * haptic.reboundDampEnergy;
-  const interval = 1 / REBOUND_HZ;
-  let time = haptic.reboundGapMs / 1000;
-  for (let i = 0; i < total; i += 1) {
-    const progress = i / Math.max(1, total);
-    const envelope = Math.max(0, 1 - progress) ** dampingExp;
-    const intensity = envelope * energy;
-    if (intensity < haptic.reboundFloor) continue;
-    const sharpness = Math.max(0.1, haptic.reboundS - progress * haptic.reboundSDrop);
-    const tailI = intensity * haptic.reboundTailI;
-    const tailS = sharpness * haptic.reboundTailS * (1 - progress * 0.3);
-    const tailMs = haptic.reboundTailMs * (1 - progress * 0.5);
-    pulse(events, time, intensity, sharpness, tailI, tailS, tailMs);
-    time += interval;
-  }
+  pulse(
+    events,
+    0,
+    haptic.grabI * scale,
+    haptic.grabS,
+    haptic.grabTailI * scale,
+    haptic.grabTailS,
+    haptic.grabTailMs,
+  );
   if (events.length > 0) void haptics.playPattern(events);
+}
+
+/**
+ * One dull tap at a swing extreme. Offset is the body relative to the hang
+ * pose. `now` is seconds. Nothing fires until the offset·velocity sign flips,
+ * and nothing under the amplitude floor.
+ */
+export function noteSwing(offsetX: number, offsetY: number, vx: number, vy: number, now: number): void {
+  if (!swingOn) return;
+  const dot = offsetX * vx + offsetY * vy;
+  const prev = swingDot;
+  swingDot = dot;
+  if (prev === 0 || dot === 0 || (prev > 0) === (dot > 0)) return;
+  const amp = Math.hypot(offsetX, offsetY);
+  if (amp < haptic.swingMinPx || now - swingAt < SWING_GAP_S) return;
+  const intensity = haptic.swingI * clamp01(amp / haptic.swingFullPx);
+  if (intensity < haptic.swingFloor) return;
+  swingAt = now;
+  void haptics.playTransient(clamp01(intensity), clamp01(haptic.swingS));
 }
 
 /**

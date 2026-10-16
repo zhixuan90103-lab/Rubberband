@@ -285,23 +285,17 @@ Swift `pluginMethods` **只有这些**。JS 多调一个就会 UNIMPLEMENTED。
 
 ## 8. 现行玩法震动
 
-五处。数字在 `hapticDefaults`。回弹算法对齐弹簧球的 Decay：一条图案里排好，不按物理换向再开播放器。
+五处。数字在 `hapticDefaults`。抓住是一条图案。摆动余韵跟着绳子端点，各自一次瞬态。
 
 | 时机 | 怎么响 | 停 |
 |---|---|---|
 | 拉动蓄力 | `drag` 期间一条连续震动。强度、锐度在最小和最大之间，跟 `(reach - restDrop) / maxPull`。比例达到 `grainAt` 时另叠一层碎抖 | 松手、取消，或阶段离开 `drag`（含铆钉失效） |
-| 抓住 | 立刻一声固定瞬态。可选一段余韵，默认关 | 一次 |
-| 抓住后的回弹 | 和抓住放在同一条 `playPattern` 里 | 下一次图案会停掉这一条 |
+| 抓住 | 一条 `playPattern`：立刻一声瞬态，10 毫秒后一条短连续余韵 | 下一次图案会停掉这一条 |
+| 摆动 | 相对悬挂点的位移和速度点积换号时一声闷瞬态。摆幅小于 `swingMinPx`，或强度低于 `swingFloor`，不响 | 再按、坠落，或这次抓住结束 |
 | 撞墙 | 飞行中 `vx` 变号且来速大于 80 时一声。强度是 `wallMul × (|vx| - 80) / 1000`，低于 `wallFloor` 不响 | 一次 |
 | 死亡 | 进入 `fall` 一声，强度 `deathI`、锐度 `deathS`。同一次坠落不重复 | 一次 |
 | 吃到金币 | 每吃到一枚一声瞬态，强度 `coinI`、锐度 `coinS` | 一次 |
 
-满拉来势约 2338 px/s 算回弹力度 1，小于此按比例。回弹：
+满拉来势约 2338 px/s 算力度 1。抓住强度是 `grabI × (0.75 + 0.25 × 力度)`，锐度是 `grabS`。余韵强度同样乘这个比例，锐度是 `grabTailS`，时长是 `grabTailMs`。
 
-- 第一拍前空 `reboundGapMs`。之后每 1/6 秒一拍。
-- 拍数 = `reboundBase + 力度 × reboundEnergy`。
-- 第 i 拍进度 = `i / 拍数`。强度 = `(1 - 进度) ^ (reboundDamp - 力度 × reboundDampEnergy) × 力度`。低于 `reboundFloor` 的拍子丢掉。
-- 锐度 = `max(0.1, reboundS - 进度 × reboundSDrop)`。
-- 余韵在瞬态后 10 毫秒。强度是该拍瞬态的 `reboundTailI`，锐度是该拍锐度的 `reboundTailS × (1 - 进度 × 0.3)`。时长是 `reboundTailMs × (1 - 进度 × 0.5)` 毫秒。
-
-抓住那一声用 `grabI` / `grabS`，不跟来势走。它的余韵用 `grabTail*`，和回弹余韵不是同一组数。
+摆动强度是 `swingI × min(1, 摆幅 / swingFullPx)`，锐度是 `swingS`。两次端点至少隔 120 毫秒。

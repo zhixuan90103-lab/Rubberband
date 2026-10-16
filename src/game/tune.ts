@@ -77,23 +77,17 @@ export type HapticFeel = {
   /** Grab hit. Fixed, not scaled by arrival speed. */
   grabI: number;
   grabS: number;
-  /** One continuous tail right after the grab hit. */
+  /** Continuous tail 10 ms after the grab hit. Intensity scales with the hit. */
   grabTailI: number;
   grabTailS: number;
   grabTailMs: number;
-  /** SpringBall decay. Count is base + force × bounceEnergy. */
-  reboundGapMs: number;
-  reboundBase: number;
-  reboundEnergy: number;
-  reboundDamp: number;
-  reboundDampEnergy: number;
-  reboundS: number;
-  reboundSDrop: number;
-  reboundFloor: number;
-  /** Tail after each rebound transient, as a fraction of that transient. */
-  reboundTailMs: number;
-  reboundTailI: number;
-  reboundTailS: number;
+  /** Dull tap when the rope reaches a swing extreme. */
+  swingI: number;
+  swingS: number;
+  swingFloor: number;
+  /** Offset from the hang pose, in design pixels. */
+  swingMinPx: number;
+  swingFullPx: number;
   wallMul: number;
   wallS: number;
   wallFloor: number;
@@ -113,22 +107,16 @@ export const hapticDefaults: HapticFeel = {
   grainI: 0.3,
   grainS: 0,
   grainHz: 25,
-  grabI: 0.36,
-  grabS: 0.31,
-  grabTailI: 0,
-  grabTailS: 0,
-  grabTailMs: 0,
-  reboundGapMs: 10,
-  reboundBase: 2,
-  reboundEnergy: 2.1,
-  reboundDamp: 5.1,
-  reboundDampEnergy: 5,
-  reboundS: 0.15,
-  reboundSDrop: 0.6,
-  reboundFloor: 0.18,
-  reboundTailMs: 20,
-  reboundTailI: 0.29,
-  reboundTailS: 0.09,
+  grabI: 0.48,
+  grabS: 0.5,
+  grabTailI: 0.17,
+  grabTailS: 0.2,
+  grabTailMs: 40,
+  swingI: 0.4,
+  swingS: 0,
+  swingFloor: 0.19,
+  swingMinPx: 18,
+  swingFullPx: 90,
   wallMul: 0.8,
   wallS: 0.1,
   wallFloor: 0.2,

@@ -110,7 +110,7 @@ SceneDelegate.rootViewController = BridgeViewController()
 
 Swift **没有** `prepare`；引擎在 `load()` 启动。UIKit 反馈在主线程触发。插件是否挂上，用真机上 `isPluginAvailable('AdvancedHaptics')` 和拉、抓时有没有震来确认。拉射页没有「点我震动」按钮。
 
-玩法四处在 `src/game/feelHaptics.ts`。蓄力用连续震动加碎抖；抓住和回弹是一条 `playPattern`。规则和公式见 [HAPTICS.md](./HAPTICS.md) §8。默认数在 `hapticDefaults`。不要在 `main.ts` 里直接打插件。
+玩法震动在 `src/game/feelHaptics.ts`。蓄力用连续震动加碎抖；抓住是一条 `playPattern`；摆到端点另打一声。规则和公式见 [HAPTICS.md](./HAPTICS.md) §8。默认数在 `hapticDefaults`。不要在 `main.ts` 里直接打插件。
 
 ## 7b. Audio（尚未实现）
 

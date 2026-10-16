@@ -39,7 +39,7 @@ import {
   tryBeginDrag,
   type SlingWorld,
 } from './game/sling';
-import { beginCharge, endCharge, playCoin, playDeath, playGrab, playWall, updateCharge } from './game/feelHaptics';
+import { beginCharge, endCharge, endSwing, noteSwing, playCoin, playDeath, playGrab, playWall, updateCharge } from './game/feelHaptics';
 import { mountTunePanel } from './game/tunePanel';
 import {
   BODY_RADIUS,
@@ -1776,6 +1776,20 @@ async function boot(): Promise<void> {
     if (world.grabPulse !== heardGrab) {
       heardGrab = world.grabPulse;
       if (world.catch) playGrab(world.catch.surge0);
+    }
+    if (world.phase === 'drag' || !world.catch) {
+      endSwing();
+    } else {
+      const peg = world.pegs.find((item) => item.id === world.heldId);
+      if (peg) {
+        noteSwing(
+          world.body.x - peg.x,
+          world.body.y - (peg.y + feel.restDrop),
+          world.body.vx,
+          world.body.vy,
+          now / 1000,
+        );
+      }
     }
     if (world.phase !== 'drag') endCharge();
     const falling = world.phase === 'fall';
